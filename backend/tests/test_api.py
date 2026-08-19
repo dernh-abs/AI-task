@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 test_db = Path(tempfile.gettempdir()) / f"quanyi-mvp-test-{uuid.uuid4().hex}.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{test_db.as_posix()}"
 os.environ["SEED_DEMO_DATA"] = "true"
+os.environ["AUTO_CREATE_SCHEMA"] = "true"
 from app.main import app
 from app.database import engine
 from app.external_reminders import reminder_level, scan_external_reminders
@@ -88,16 +89,21 @@ def test_manual_task_submission_review_and_idempotency() -> None:
 
         ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
         ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
-        approve = client.post("/api/tasks/t-mvp-2/actions/APPROVE", headers={**ceo_headers, "Idempotency-Key": "approve-t-mvp-2"}, json={"expected_version": 3})
+        returned = client.post("/api/tasks/t-mvp-2/actions/RETURN", headers={**ceo_headers, "Idempotency-Key": "return-t-mvp-2"}, json={"expected_version": 3, "reason": "请补充权限验证结果"})
+        assert returned.status_code == 200
+        assert returned.json()["task"]["status"] == "IN_PROGRESS"
+        resubmit = client.post("/api/tasks/t-mvp-2/actions/SUBMIT", headers={**member_headers, "Idempotency-Key": "resubmit-t-mvp-2"}, json={"expected_version": 4, "summary": "已补充权限验证和越权拒绝结果。"})
+        assert resubmit.status_code == 200
+        approve = client.post("/api/tasks/t-mvp-2/actions/APPROVE", headers={**ceo_headers, "Idempotency-Key": "approve-t-mvp-2"}, json={"expected_version": 5})
         assert approve.status_code == 200
         assert approve.json()["task"]["status"] == "DONE"
         assert approve.json()["task"]["progress"] == 100
 
         submissions = client.get("/api/tasks/t-mvp-2/submissions", headers=member_headers)
         assert submissions.status_code == 200
-        assert len(submissions.json()) == 1
+        assert len(submissions.json()) == 2
         history = client.get("/api/tasks/t-mvp-2/history", headers=member_headers)
-        assert [item["action"] for item in history.json()] == ["APPROVE", "SUBMIT", "START"]
+        assert [item["action"] for item in history.json()] == ["APPROVE", "SUBMIT", "RETURN", "SUBMIT", "START"]
         contributions = client.get("/api/contributions", headers=member_headers).json()
         assert len([item for item in contributions if item["task_id"] == "t-mvp-2"]) == 1
 

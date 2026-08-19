@@ -11,7 +11,7 @@
 
 ## 当前阶段
 
-阶段 6：项目、阶段聚合与贡献事件已实现。
+规划中的必做开发阶段 0–6 已实现。当前处于发布验收：自动化与 Mock 模式已通过；正式 MVP 放行仍须使用有效 `QWEN_API_KEY` 完成至少一次候选提取和一次任务草稿的 Live 验收，详见 `docs/release-checklist.md`。
 
 - 新建项目、阶段和手动任务均走真实 API 与数据库，不再使用前端临时 ID。
 - 阶段使用独立 `PLANNED/ACTIVE/WAITING_REVIEW/DONE` 状态机，可在项目空间推进。

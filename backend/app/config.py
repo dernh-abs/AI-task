@@ -21,6 +21,7 @@ class Settings:
     qwen_api_key: str | None
     qwen_model: str
     ai_daily_budget_usd: float
+    auto_create_schema: bool
 
 
 def load_settings() -> Settings:
@@ -35,4 +36,5 @@ def load_settings() -> Settings:
         qwen_api_key=os.getenv("QWEN_API_KEY"),
         qwen_model=os.getenv("QWEN_MODEL", "qwen-turbo"),
         ai_daily_budget_usd=float(os.getenv("AI_DAILY_BUDGET_USD", "1.0")),
+        auto_create_schema=_as_bool(os.getenv("AUTO_CREATE_SCHEMA"), False),
     )

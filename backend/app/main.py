@@ -38,7 +38,8 @@ async def _external_reminder_worker() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    create_schema()
+    if settings.auto_create_schema:
+        create_schema()
     if settings.seed_demo_data:
         seed_demo_data()
     with Session(engine) as recovery_session:
