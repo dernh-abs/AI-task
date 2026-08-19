@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from .models import AuditEvent, IdempotencyRecord, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
+from .models import AuditEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
 from .schemas import TaskAction, TaskActionRequest
 
 
@@ -24,6 +24,8 @@ TRANSITIONS: dict[TaskAction, tuple[set[TaskStatus], TaskStatus]] = {
     "SUBMIT": ({TaskStatus.IN_PROGRESS}, TaskStatus.WAITING_REVIEW),
     "APPROVE": ({TaskStatus.WAITING_REVIEW}, TaskStatus.DONE),
     "RETURN": ({TaskStatus.WAITING_REVIEW}, TaskStatus.IN_PROGRESS),
+    "WAIT_EXTERNAL": ({TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}, TaskStatus.WAITING_EXTERNAL),
+    "RESUME_EXTERNAL": ({TaskStatus.WAITING_EXTERNAL}, TaskStatus.IN_PROGRESS),
     "CANCEL": ({TaskStatus.PENDING_OWNER_CONFIRMATION, TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED, TaskStatus.WAITING_REVIEW}, TaskStatus.CANCELED),
 }
 
@@ -51,6 +53,12 @@ def _guard(task: Task, action: TaskAction, actor: User, payload: TaskActionReque
         raise DomainError(422, "EMPTY_SUBMISSION", "A result summary, URL, or asset reference is required")
     if action in {"RETURN", "CANCEL"} and not payload.reason.strip():
         raise DomainError(422, "REASON_REQUIRED", "A reason is required")
+    if action == "WAIT_EXTERNAL":
+        if not _is_owner(task, actor):
+            raise DomainError(403, "FORBIDDEN", "Only the task owner can create an external dependency")
+        required = [payload.contact_id, payload.item, payload.expected_at, payload.internal_followup_user_id, payload.recovery_action]
+        if not all(required):
+            raise DomainError(422, "EXTERNAL_DEPENDENCY_INCOMPLETE", "Contact, item, expected time, internal follow-up owner, and recovery action are required")
 
 
 def apply_task_action(session: Session, task: Task, action: TaskAction, actor: User, payload: TaskActionRequest, idempotency_key: str) -> bool:
@@ -68,6 +76,29 @@ def apply_task_action(session: Session, task: Task, action: TaskAction, actor: U
         latest = session.exec(select(TaskSubmission).where(TaskSubmission.task_id == task.id).order_by(TaskSubmission.version.desc())).first()
         submission_version = 1 if latest is None else latest.version + 1
         session.add(TaskSubmission(id=f"sub-{uuid4().hex}", task_id=task.id, version=submission_version, submitted_by=actor.id, summary=payload.summary.strip(), external_url=payload.external_url, asset_reference=payload.asset_reference))
+    if action == "WAIT_EXTERNAL":
+        contact = session.get(ExternalContact, payload.contact_id)
+        project = session.get(Project, task.project_id)
+        if not contact or not project or contact.team_id != project.team_id:
+            raise DomainError(422, "CONTACT_NOT_FOUND", "External contact does not exist")
+        followup = session.get(User, payload.internal_followup_user_id)
+        project_membership = session.get(ProjectMember, (task.project_id, payload.internal_followup_user_id))
+        if not followup or (not project_membership and project.owner_id != payload.internal_followup_user_id):
+            raise DomainError(422, "FOLLOWUP_USER_NOT_FOUND", "Internal follow-up user does not exist")
+        active = session.exec(select(ExternalDependency).where(ExternalDependency.task_id == task.id, ExternalDependency.external_feedback_status == ExternalFeedbackStatus.WAITING)).first()
+        if active:
+            raise DomainError(409, "ACTIVE_EXTERNAL_DEPENDENCY_EXISTS", "The task already has an active external dependency")
+        session.add(ExternalDependency(id=f"ext-{uuid4().hex}", task_id=task.id, contact_id=payload.contact_id or "", item=(payload.item or "").strip(), expected_at=payload.expected_at, internal_followup_user_id=payload.internal_followup_user_id or "", recovery_action=(payload.recovery_action or "").strip()))
+    if action == "RESUME_EXTERNAL":
+        dependency = session.exec(select(ExternalDependency).where(ExternalDependency.task_id == task.id, ExternalDependency.external_feedback_status == ExternalFeedbackStatus.WAITING).order_by(ExternalDependency.created_at.desc())).first()
+        if not dependency:
+            raise DomainError(422, "EXTERNAL_DEPENDENCY_NOT_FOUND", "No active external dependency exists")
+        if actor.id not in {task.owner_id, dependency.internal_followup_user_id} and actor.role != TeamRole.CEO:
+            raise DomainError(403, "FORBIDDEN", "Only the task owner or internal follow-up owner can resume this task")
+        dependency.external_feedback_status = ExternalFeedbackStatus.RECEIVED
+        dependency.actual_received_at = utc_now()
+        dependency.updated_at = utc_now()
+        session.add(dependency)
     task.status = to_status
     task.progress = 100 if to_status == TaskStatus.DONE else 95 if to_status == TaskStatus.WAITING_REVIEW else max(5, min(task.progress, 85))
     task.version += 1

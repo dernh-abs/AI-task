@@ -7772,6 +7772,15 @@ a:focus-visible {
   color: var(--hub-red);
 }
 
+.task-external-dependency { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; margin-top: 10px; padding: 11px 13px; border: 1px solid #dce5f5; border-radius: 9px; background: #f7f9fd; color: #55708f; }
+.task-external-dependency > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.task-external-dependency span { color: #60718a; font-size: 12px; }
+.task-external-dependency strong { color: #344258; font-size: 13px; font-weight: 600; }
+.task-external-dependency small, .task-external-dependency p { margin: 0; color: var(--hub-subtle); font-size: 11px; line-height: 1.5; }
+.task-external-dependency.upcoming { border-color: #f0d59d; background: #fffaf0; color: #a16b08; }
+.task-external-dependency.overdue { border-color: #edc5c8; background: #fff6f6; color: #b4444d; }
+.task-external-dependency.received { border-color: #bfe4d2; background: #f3fbf7; color: #25845b; }
+
 .task-blocked-reason p { display: flex; flex-direction: column; gap: 3px; margin: 0; }
 .task-blocked-reason span { font-size: 11px; font-weight: 750; }
 .task-blocked-reason strong { color: #7d3037; font-size: 12px; line-height: 1.55; }

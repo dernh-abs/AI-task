@@ -157,6 +157,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/external-contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External Contacts */
+        get: operations["external_contacts_api_external_contacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/external-dependency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Task External Dependency */
+        get: operations["task_external_dependency_api_tasks__task_id__external_dependency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/external-reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External Reminders */
+        get: operations["external_reminders_api_external_reminders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -166,6 +217,68 @@ export interface components {
          * @enum {string}
          */
         ExecutionMode: "HUMAN" | "AI" | "HYBRID";
+        /** ExternalContactRead */
+        ExternalContactRead: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Organization */
+            organization: string;
+            /** Channel */
+            channel: string;
+        };
+        /** ExternalDependencyRead */
+        ExternalDependencyRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Contact Id */
+            contact_id: string;
+            /** Contact Name */
+            contact_name: string;
+            /** Item */
+            item: string;
+            /**
+             * Expected At
+             * Format: date-time
+             */
+            expected_at: string;
+            /** Internal Followup User Id */
+            internal_followup_user_id: string;
+            /** Internal Followup User Name */
+            internal_followup_user_name: string;
+            /** Recovery Action */
+            recovery_action: string;
+            /** Last Followup At */
+            last_followup_at: string | null;
+            /** External Feedback Status */
+            external_feedback_status: string;
+            /** Actual Received At */
+            actual_received_at: string | null;
+            /** Reminder Sent */
+            reminder_sent: boolean;
+            /**
+             * Reminder Level
+             * @enum {string}
+             */
+            reminder_level: "NORMAL" | "UPCOMING" | "OVERDUE" | "RECEIVED";
+        };
+        /** ExternalReminderRead */
+        ExternalReminderRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Reminder Type */
+            reminder_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -291,6 +404,16 @@ export interface components {
              * @default
              */
             reason: string;
+            /** Contact Id */
+            contact_id?: string | null;
+            /** Item */
+            item?: string | null;
+            /** Expected At */
+            expected_at?: string | null;
+            /** Internal Followup User Id */
+            internal_followup_user_id?: string | null;
+            /** Recovery Action */
+            recovery_action?: string | null;
         };
         /** TaskActionResponse */
         TaskActionResponse: {
@@ -560,7 +683,7 @@ export interface operations {
             };
             path: {
                 task_id: string;
-                action: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "CANCEL";
+                action: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "WAIT_EXTERNAL" | "RESUME_EXTERNAL" | "CANCEL";
             };
             cookie?: never;
         };
@@ -648,6 +771,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    external_contacts_api_external_contacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalContactRead"][];
+                };
+            };
+        };
+    };
+    task_external_dependency_api_tasks__task_id__external_dependency_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalDependencyRead"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    external_reminders_api_external_reminders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalReminderRead"][];
                 };
             };
         };

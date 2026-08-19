@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from .models import ExecutionMode, Project, Stage, StageStatus, Task, TaskStatus, User
+from .external_reminders import reminder_level
+from .models import ExecutionMode, ExternalDependency, ExternalFeedbackStatus, Project, Stage, StageStatus, Task, TaskStatus, User
 from .schemas import ProjectRead, StageRead, TaskRead
 
 
@@ -50,6 +52,8 @@ def project_reads(session: Session, project_ids: list[str]) -> list[ProjectRead]
     projects = session.exec(select(Project).where(Project.id.in_(project_ids))).all()
     stages = session.exec(select(Stage).where(Stage.project_id.in_(project_ids))).all()
     tasks = session.exec(select(Task).where(Task.project_id.in_(project_ids))).all()
+    external_dependencies = session.exec(select(ExternalDependency).where(ExternalDependency.external_feedback_status == ExternalFeedbackStatus.WAITING)).all()
+    dependency_by_task = {item.task_id: item for item in external_dependencies}
     names = _user_names(session)
     stages_by_project: dict[str, list[Stage]] = defaultdict(list)
     tasks_by_stage: dict[str | None, list[Task]] = defaultdict(list)
@@ -68,6 +72,8 @@ def project_reads(session: Session, project_ids: list[str]) -> list[ProjectRead]
         project_tasks = [task for task in tasks if task.project_id == project.id]
         progress = round(sum(task.progress for task in project_tasks) / len(project_tasks)) if project_tasks else 0
         has_blocker = any(task.status == TaskStatus.BLOCKED for task in project_tasks)
+        external_levels = [reminder_level(dependency_by_task[task.id].expected_at, datetime.now(timezone.utc)) for task in project_tasks if task.id in dependency_by_task]
+        health = "需关注" if "OVERDUE" in external_levels else "有风险" if has_blocker or "UPCOMING" in external_levels else "正常"
         current_stage = next((stage.name for stage in project_stages if stage.status == StageStatus.ACTIVE), project_stages[0].name if project_stages else "未设置")
-        results.append(ProjectRead(id=project.id, name=project.name, client=project.client, objective=project.objective, owner_id=project.owner_id, owner_name=names.get(project.owner_id, "未指定"), next_milestone=project.next_milestone, due_at=project.due_at, progress=progress, health="有风险" if has_blocker else "正常", current_stage=current_stage, stages=stage_reads))
+        results.append(ProjectRead(id=project.id, name=project.name, client=project.client, objective=project.objective, owner_id=project.owner_id, owner_name=names.get(project.owner_id, "未指定"), next_milestone=project.next_milestone, due_at=project.due_at, progress=progress, health=health, current_stage=current_stage, stages=stage_reads))
     return results

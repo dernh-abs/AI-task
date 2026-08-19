@@ -2,6 +2,7 @@ import atexit
 import os
 import tempfile
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,6 +13,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{test_db.as_posix()}"
 os.environ["SEED_DEMO_DATA"] = "true"
 from app.main import app
 from app.database import engine
+from app.external_reminders import reminder_level, scan_external_reminders
+from sqlmodel import Session
 
 
 def cleanup_test_database() -> None:
@@ -104,3 +107,34 @@ def test_version_conflict_is_rejected() -> None:
         response = client.post("/api/tasks/t-mvp-1/actions/SUBMIT", headers=headers, json={"expected_version": 999, "summary": "不会被接受"})
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "VERSION_CONFLICT"
+
+
+def test_waiting_external_reminder_and_resume_flow() -> None:
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        incomplete = client.post("/api/tasks/t-mvp-1/actions/WAIT_EXTERNAL", headers={**headers, "Idempotency-Key": "external-incomplete"}, json={"expected_version": 1})
+        assert incomplete.status_code == 422
+        expected_at = datetime.now(timezone.utc) + timedelta(hours=2)
+        wait = client.post("/api/tasks/t-mvp-1/actions/WAIT_EXTERNAL", headers={**headers, "Idempotency-Key": "external-create-1"}, json={"expected_version": 1, "contact_id": "contact-client", "item": "客户确认首页文案", "expected_at": expected_at.isoformat(), "internal_followup_user_id": "u-member", "recovery_action": "收到确认后继续制作页面"})
+        assert wait.status_code == 200
+        assert wait.json()["task"]["status"] == "WAITING_EXTERNAL"
+        assert wait.json()["task"]["progress"] == 45
+        now = datetime.now(timezone.utc)
+        assert reminder_level(now + timedelta(hours=25), now) == "NORMAL"
+        assert reminder_level(now + timedelta(hours=24), now) == "UPCOMING"
+        assert reminder_level(now - timedelta(seconds=1), now) == "OVERDUE"
+        assert client.get("/api/projects", headers=headers).json()[0]["health"] == "有风险"
+        dependency = client.get("/api/tasks/t-mvp-1/external-dependency", headers=headers).json()
+        assert dependency["reminder_level"] == "UPCOMING"
+        with Session(engine) as session:
+            assert len(scan_external_reminders(session)) == 1
+            assert len(scan_external_reminders(session)) == 0
+        assert len(client.get("/api/external-reminders", headers=headers).json()) == 1
+        resume = client.post("/api/tasks/t-mvp-1/actions/RESUME_EXTERNAL", headers={**headers, "Idempotency-Key": "external-resume-1"}, json={"expected_version": 2})
+        assert resume.status_code == 200
+        assert resume.json()["task"]["status"] == "IN_PROGRESS"
+        restored = client.get("/api/tasks/t-mvp-1/external-dependency", headers=headers).json()
+        assert restored["external_feedback_status"] == "RECEIVED"
+        assert restored["actual_received_at"] is not None
+        assert client.get("/api/projects", headers=headers).json()[0]["health"] == "正常"

@@ -10,6 +10,8 @@ type TokenResponse = components["schemas"]["TokenResponse"];
 export type ApiTaskActionRequest = components["schemas"]["TaskActionRequest"];
 export type ApiTaskActionResponse = components["schemas"]["TaskActionResponse"];
 export type ApiSubmission = components["schemas"]["SubmissionRead"];
+export type ApiExternalContact = components["schemas"]["ExternalContactRead"];
+export type ApiExternalDependency = components["schemas"]["ExternalDependencyRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
 export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:(token:string)=>window.localStorage.setItem(TOKEN_KEY,token), clear:()=>window.localStorage.removeItem(TOKEN_KEY) };
@@ -25,5 +27,7 @@ export const login=(email:string,password:string)=>request<TokenResponse>("/auth
 export const fetchMe=()=>request<ApiUser>("/auth/me");
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
 export const fetchTasks=()=>request<ApiTask[]>("/tasks");
-export const performTaskAction=(taskId:string,action:"ACCEPT"|"START"|"SUBMIT"|"APPROVE"|"RETURN"|"CANCEL",payload:ApiTaskActionRequest,idempotencyKey=crypto.randomUUID())=>request<ApiTaskActionResponse>(`/tasks/${taskId}/actions/${action}`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify(payload)});
+export const performTaskAction=(taskId:string,action:"ACCEPT"|"START"|"SUBMIT"|"APPROVE"|"RETURN"|"WAIT_EXTERNAL"|"RESUME_EXTERNAL"|"CANCEL",payload:ApiTaskActionRequest,idempotencyKey=crypto.randomUUID())=>request<ApiTaskActionResponse>(`/tasks/${taskId}/actions/${action}`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify(payload)});
 export const fetchTaskSubmissions=(taskId:string)=>request<ApiSubmission[]>(`/tasks/${taskId}/submissions`);
+export const fetchExternalContacts=()=>request<ApiExternalContact[]>("/external-contacts");
+export const fetchExternalDependency=(taskId:string)=>request<ApiExternalDependency|null>(`/tasks/${taskId}/external-dependency`);

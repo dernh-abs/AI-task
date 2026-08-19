@@ -73,7 +73,7 @@ class TaskRead(BaseModel):
     version: int
 
 
-TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "CANCEL"]
+TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "WAIT_EXTERNAL", "RESUME_EXTERNAL", "CANCEL"]
 
 
 class TaskActionRequest(BaseModel):
@@ -82,6 +82,11 @@ class TaskActionRequest(BaseModel):
     external_url: str | None = None
     asset_reference: str | None = None
     reason: str = ""
+    contact_id: str | None = None
+    item: str | None = None
+    expected_at: datetime | None = None
+    internal_followup_user_id: str | None = None
+    recovery_action: str | None = None
 
 
 class TaskActionResponse(BaseModel):
@@ -111,3 +116,34 @@ class StatusHistoryRead(BaseModel):
     action: str
     reason: str
     created_at: datetime
+
+
+class ExternalDependencyRead(BaseModel):
+    id: str
+    task_id: str
+    contact_id: str
+    contact_name: str
+    item: str
+    expected_at: datetime
+    internal_followup_user_id: str
+    internal_followup_user_name: str
+    recovery_action: str
+    last_followup_at: datetime | None
+    external_feedback_status: str
+    actual_received_at: datetime | None
+    reminder_sent: bool
+    reminder_level: Literal["NORMAL", "UPCOMING", "OVERDUE", "RECEIVED"]
+
+
+class ExternalReminderRead(BaseModel):
+    id: str
+    task_id: str
+    reminder_type: str
+    created_at: datetime
+
+
+class ExternalContactRead(BaseModel):
+    id: str
+    name: str
+    organization: str
+    channel: str

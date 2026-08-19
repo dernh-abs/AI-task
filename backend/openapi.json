@@ -244,6 +244,8 @@
                 "SUBMIT",
                 "APPROVE",
                 "RETURN",
+                "WAIT_EXTERNAL",
+                "RESUME_EXTERNAL",
                 "CANCEL"
               ],
               "type": "string",
@@ -390,6 +392,112 @@
           }
         }
       }
+    },
+    "/api/external-contacts": {
+      "get": {
+        "summary": "External Contacts",
+        "operationId": "external_contacts_api_external_contacts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalContactRead"
+                  },
+                  "type": "array",
+                  "title": "Response External Contacts Api External Contacts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/tasks/{task_id}/external-dependency": {
+      "get": {
+        "summary": "Task External Dependency",
+        "operationId": "task_external_dependency_api_tasks__task_id__external_dependency_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExternalDependencyRead"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Task External Dependency Api Tasks  Task Id  External Dependency Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/external-reminders": {
+      "get": {
+        "summary": "External Reminders",
+        "operationId": "external_reminders_api_external_reminders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalReminderRead"
+                  },
+                  "type": "array",
+                  "title": "Response External Reminders Api External Reminders Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -402,6 +510,164 @@
           "HYBRID"
         ],
         "title": "ExecutionMode"
+      },
+      "ExternalContactRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "organization": {
+            "type": "string",
+            "title": "Organization"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "organization",
+          "channel"
+        ],
+        "title": "ExternalContactRead"
+      },
+      "ExternalDependencyRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "contact_id": {
+            "type": "string",
+            "title": "Contact Id"
+          },
+          "contact_name": {
+            "type": "string",
+            "title": "Contact Name"
+          },
+          "item": {
+            "type": "string",
+            "title": "Item"
+          },
+          "expected_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected At"
+          },
+          "internal_followup_user_id": {
+            "type": "string",
+            "title": "Internal Followup User Id"
+          },
+          "internal_followup_user_name": {
+            "type": "string",
+            "title": "Internal Followup User Name"
+          },
+          "recovery_action": {
+            "type": "string",
+            "title": "Recovery Action"
+          },
+          "last_followup_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Followup At"
+          },
+          "external_feedback_status": {
+            "type": "string",
+            "title": "External Feedback Status"
+          },
+          "actual_received_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Received At"
+          },
+          "reminder_sent": {
+            "type": "boolean",
+            "title": "Reminder Sent"
+          },
+          "reminder_level": {
+            "type": "string",
+            "enum": [
+              "NORMAL",
+              "UPCOMING",
+              "OVERDUE",
+              "RECEIVED"
+            ],
+            "title": "Reminder Level"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "contact_id",
+          "contact_name",
+          "item",
+          "expected_at",
+          "internal_followup_user_id",
+          "internal_followup_user_name",
+          "recovery_action",
+          "last_followup_at",
+          "external_feedback_status",
+          "actual_received_at",
+          "reminder_sent",
+          "reminder_level"
+        ],
+        "title": "ExternalDependencyRead"
+      },
+      "ExternalReminderRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "reminder_type": {
+            "type": "string",
+            "title": "Reminder Type"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "reminder_type",
+          "created_at"
+        ],
+        "title": "ExternalReminderRead"
       },
       "HTTPValidationError": {
         "properties": {
@@ -719,6 +985,62 @@
             "type": "string",
             "title": "Reason",
             "default": ""
+          },
+          "contact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Id"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item"
+          },
+          "expected_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected At"
+          },
+          "internal_followup_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Followup User Id"
+          },
+          "recovery_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Action"
           }
         },
         "type": "object",

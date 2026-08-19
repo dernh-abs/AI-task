@@ -47,6 +47,11 @@ class ExecutionMode(StrEnum):
     HYBRID = "HYBRID"
 
 
+class ExternalFeedbackStatus(StrEnum):
+    WAITING = "WAITING"
+    RECEIVED = "RECEIVED"
+
+
 class User(SQLModel, table=True):
     id: str = Field(primary_key=True)
     email: str = Field(sa_column=Column(String(255), unique=True, index=True, nullable=False))
@@ -158,4 +163,41 @@ class IdempotencyRecord(SQLModel, table=True):
     actor_id: str = Field(foreign_key="user.id")
     resource_id: str
     action: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ExternalContact(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    team_id: str = Field(foreign_key="team.id", index=True)
+    name: str
+    organization: str = ""
+    channel: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ExternalDependency(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    contact_id: str = Field(foreign_key="externalcontact.id")
+    item: str = Field(sa_column=Column(Text, nullable=False))
+    expected_at: datetime
+    internal_followup_user_id: str = Field(foreign_key="user.id", index=True)
+    recovery_action: str = Field(sa_column=Column(Text, nullable=False))
+    last_followup_at: datetime | None = None
+    external_feedback_status: ExternalFeedbackStatus = Field(default=ExternalFeedbackStatus.WAITING, sa_column=Column(String(24), nullable=False))
+    actual_received_at: datetime | None = None
+    reminder_sent: bool = False
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class ExternalReminderEvent(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("dependency_id", "reminder_type", "reminder_date", name="uq_external_reminder_bucket"),)
+
+    id: str = Field(primary_key=True)
+    dependency_id: str = Field(foreign_key="externaldependency.id", index=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    recipient_user_id: str = Field(foreign_key="user.id", index=True)
+    reminder_type: str
+    reminder_date: str
     created_at: datetime = Field(default_factory=utc_now)
