@@ -2431,7 +2431,7 @@ a:focus-visible {
   font-size: 12px;
 }
 
-.project-card-foot span {
+.project-card-foot > span {
   display: inline-flex;
   align-items: center;
   gap: 6px;
