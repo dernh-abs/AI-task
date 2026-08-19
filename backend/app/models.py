@@ -66,6 +66,15 @@ class CandidateStatus(StrEnum):
     LINKED = "LINKED"
 
 
+class AgentRunStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    NEEDS_INPUT = "NEEDS_INPUT"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
 class User(SQLModel, table=True):
     id: str = Field(primary_key=True)
     email: str = Field(sa_column=Column(String(255), unique=True, index=True, nullable=False))
@@ -270,4 +279,32 @@ class AiCallLog(SQLModel, table=True):
 class AiResponseCache(SQLModel, table=True):
     cache_key: str = Field(primary_key=True)
     response_json: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AgentRun(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    requested_by: str = Field(foreign_key="user.id")
+    request_fingerprint: str = Field(unique=True, index=True)
+    status: AgentRunStatus = Field(sa_column=Column(String(24), nullable=False, index=True))
+    execution_mode: AiExecutionMode | None = Field(default=None, sa_column=Column(String(16), nullable=True))
+    degraded: bool = False
+    fallback_reason: str | None = None
+    prompt_version: str
+    attempt_count: int = 0
+    max_attempts: int = 2
+    output_text: str = Field(default="", sa_column=Column(Text, nullable=False))
+    error_message: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AgentRunLog(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    agent_run_id: str = Field(foreign_key="agentrun.id", index=True)
+    level: str
+    message: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=utc_now)

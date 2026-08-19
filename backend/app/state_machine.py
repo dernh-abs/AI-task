@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from .models import AuditEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunStatus, AuditEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
 from .schemas import TaskAction, TaskActionRequest
 
 
@@ -26,6 +26,8 @@ TRANSITIONS: dict[TaskAction, tuple[set[TaskStatus], TaskStatus]] = {
     "RETURN": ({TaskStatus.WAITING_REVIEW}, TaskStatus.IN_PROGRESS),
     "WAIT_EXTERNAL": ({TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED}, TaskStatus.WAITING_EXTERNAL),
     "RESUME_EXTERNAL": ({TaskStatus.WAITING_EXTERNAL}, TaskStatus.IN_PROGRESS),
+    "CONFIRM_AI": ({TaskStatus.WAITING_HUMAN_CONFIRMATION}, TaskStatus.WAITING_REVIEW),
+    "REVISE_AI": ({TaskStatus.WAITING_HUMAN_CONFIRMATION}, TaskStatus.IN_PROGRESS),
     "CANCEL": ({TaskStatus.PENDING_OWNER_CONFIRMATION, TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED, TaskStatus.WAITING_REVIEW}, TaskStatus.CANCELED),
 }
 
@@ -53,6 +55,12 @@ def _guard(task: Task, action: TaskAction, actor: User, payload: TaskActionReque
         raise DomainError(422, "EMPTY_SUBMISSION", "A result summary, URL, or asset reference is required")
     if action in {"RETURN", "CANCEL"} and not payload.reason.strip():
         raise DomainError(422, "REASON_REQUIRED", "A reason is required")
+    if action in {"CONFIRM_AI", "REVISE_AI"} and not _is_owner(task, actor):
+        raise DomainError(403, "FORBIDDEN", "Only the task owner can confirm AI output")
+    if action == "REVISE_AI" and not payload.reason.strip():
+        raise DomainError(422, "REASON_REQUIRED", "Revision feedback is required")
+    if action == "CONFIRM_AI" and not payload.agent_run_id:
+        raise DomainError(422, "AGENT_RUN_REQUIRED", "A successful agent run is required")
     if action == "WAIT_EXTERNAL":
         if not _is_owner(task, actor):
             raise DomainError(403, "FORBIDDEN", "Only the task owner can create an external dependency")
@@ -99,6 +107,13 @@ def apply_task_action(session: Session, task: Task, action: TaskAction, actor: U
         dependency.actual_received_at = utc_now()
         dependency.updated_at = utc_now()
         session.add(dependency)
+    if action == "CONFIRM_AI":
+        run = session.get(AgentRun, payload.agent_run_id)
+        if not run or run.task_id != task.id or AgentRunStatus(run.status) != AgentRunStatus.SUCCEEDED or not run.output_text.strip():
+            raise DomainError(422, "AGENT_RUN_INVALID", "Agent run must have a successful non-empty output")
+        latest = session.exec(select(TaskSubmission).where(TaskSubmission.task_id == task.id).order_by(TaskSubmission.version.desc())).first()
+        submission_version = 1 if latest is None else latest.version + 1
+        session.add(TaskSubmission(id=f"sub-{uuid4().hex}", task_id=task.id, version=submission_version, submitted_by=actor.id, summary=run.output_text, external_url=None, asset_reference=f"agent-run:{run.id}"))
     task.status = to_status
     task.progress = 100 if to_status == TaskStatus.DONE else 95 if to_status == TaskStatus.WAITING_REVIEW else max(5, min(task.progress, 85))
     task.version += 1

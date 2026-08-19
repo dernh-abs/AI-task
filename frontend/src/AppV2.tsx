@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, updateCandidate, type ApiCandidate, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, fetchAgentRuns, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, type ApiAgentRun, type ApiCandidate, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -2643,9 +2643,11 @@ function TaskDetailPage() {
   const [submissionOpen, setSubmissionOpen] = useState(false);
   const [externalOpen, setExternalOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
+  const [aiRevisionOpen, setAiRevisionOpen] = useState(false);
   const [returnReason, setReturnReason] = useState("");
   const [submissions, setSubmissions] = useState<ApiSubmission[]>([]);
   const [externalDependency, setExternalDependency] = useState<ApiExternalDependency | null>(null);
+  const [agentRuns, setAgentRuns] = useState<ApiAgentRun[]>([]);
   const [activities, setActivities] = useState([
     { author: "AI 助手", text: "已根据项目上下文补充了执行建议。", time: "10 分钟前" },
     { author: task?.owner || "任务负责人", text: "更新了下一步行动。", time: "今天 10:20" },
@@ -2654,6 +2656,7 @@ function TaskDetailPage() {
     if (!taskId) return;
     fetchTaskSubmissions(taskId).then(setSubmissions).catch(() => setSubmissions([]));
     fetchExternalDependency(taskId).then(setExternalDependency).catch(() => setExternalDependency(null));
+    fetchAgentRuns(taskId).then(setAgentRuns).catch(() => setAgentRuns([]));
   }, [taskId]);
   if (!task) return <EmptyState icon={<ListTodo/>} title="没有找到这个任务" description="任务可能已被归档或删除。" action={<button className="button primary" onClick={() => navigate("/tasks")}>返回任务池</button>} />;
   const currentUser = user.name;
@@ -2663,13 +2666,14 @@ function TaskDetailPage() {
   const replaceTask = (apiTask: ApiTask) => {
     setTasks((items) => items.map((item) => item.id === apiTask.id ? taskFromApi(apiTask) : item));
   };
-  const runAction = async (actionName: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "WAIT_EXTERNAL" | "RESUME_EXTERNAL" | "CANCEL", payload: ApiTaskActionRequest, successMessage: string) => {
+  const runAction = async (actionName: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "WAIT_EXTERNAL" | "RESUME_EXTERNAL" | "CONFIRM_AI" | "REVISE_AI" | "CANCEL", payload: ApiTaskActionRequest, successMessage: string) => {
     setActionBusy(true);
     try {
       const result = await performTaskAction(task.id, actionName, payload);
       replaceTask(result.task);
       setSubmissions(await fetchTaskSubmissions(task.id));
       setExternalDependency(await fetchExternalDependency(task.id));
+      setAgentRuns(await fetchAgentRuns(task.id));
       notify(successMessage);
       return true;
     } catch (reason) {
@@ -2684,6 +2688,7 @@ function TaskDetailPage() {
     else if (task.apiStatus === "TODO") await runAction("START", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已开始");
     else if (task.apiStatus === "IN_PROGRESS") setSubmissionOpen(true);
     else if (task.apiStatus === "WAITING_EXTERNAL") await runAction("RESUME_EXTERNAL", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "已记录收到外部反馈，任务恢复执行");
+    else if (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && agentRuns[0]) await runAction("CONFIRM_AI", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "", agent_run_id: agentRuns[0].id }, "AI 草稿已由人工确认并提交验收");
     else if (task.apiStatus === "WAITING_REVIEW" && isReviewer) await runAction("APPROVE", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已验收完成");
     else if (task.apiStatus === "WAITING_REVIEW" && isTaskOwner && !reviewReminderSent) {
       addNotification({ kind: "task", title: `${task.owner}提醒你验收任务`, detail: `${task.title} · 交付物：${task.deliverable}`, taskId: task.id });
@@ -2693,8 +2698,21 @@ function TaskDetailPage() {
     }
     else if (task.status === "blocked") navigate("/help");
   };
-  const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_EXTERNAL" ? "已收到反馈，恢复执行" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
+  const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_EXTERNAL" ? "已收到反馈，恢复执行" : task.apiStatus === "WAITING_HUMAN_CONFIRMATION" ? "确认 AI 草稿并提交验收" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
   const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
+  const startAiAssistance = async () => {
+    setActionBusy(true);
+    try {
+      const result = await startAgentRun(task.id);
+      setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
+      setTasks((await fetchTasks()).map(taskFromApi));
+      notify(result.run.execution_mode === "FALLBACK" ? "AI Live 调用失败，已生成明确标识的降级草稿" : "AI 草稿已生成，等待你人工确认");
+    } catch (reason) {
+      notify(reason instanceof ApiError ? reason.message : "AI 运行启动失败");
+    } finally {
+      setActionBusy(false);
+    }
+  };
   const insertMention = (name: string) => {
     setComment((value) => value.replace(/@[^@\s]*$/, "@" + name + " "));
     setMentionMenu(false);
@@ -2721,6 +2739,8 @@ function TaskDetailPage() {
           <div><span><NavLink to="/tasks">任务池</NavLink><ChevronRight size={13}/>{task.project}</span><h1>{task.title}</h1></div>
           <div className="task-detail-header-actions">
             {(task.apiStatus === "TODO" || task.apiStatus === "IN_PROGRESS") && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setExternalOpen(true)}><Clock3 size={16}/> 等待外部</button>}
+            {task.apiStatus === "IN_PROGRESS" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={startAiAssistance}><Sparkles size={16}/> AI 协助生成草稿</button>}
+            {task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setAiRevisionOpen(true)}><ArrowLeft size={16}/> 要求 AI 重做</button>}
             {task.apiStatus === "WAITING_REVIEW" && isReviewer && <button className="button secondary" disabled={actionBusy} onClick={() => setReturnOpen(true)}><ArrowLeft size={16}/> 退回修改</button>}
             <button disabled={actionDisabled} className={"button primary " + (actionDisabled ? "disabled" : "")} onClick={action}>{task.status === "ai" ? <Activity size={16}/> : task.status === "review" && isTaskOwner ? <Bell size={16}/> : <ArrowRight size={16}/>} {actionLabel}</button>
           </div>
@@ -2744,6 +2764,7 @@ function TaskDetailPage() {
 
           <div className="task-detail-lower">
             <section className="task-detail-section ai-suggestion"><h2><Sparkles size={17}/> AI 建议</h2><ol><li><span>1</span>先确认当前交付物的判断标准</li><li><span>2</span>读取项目最近会议与相关资产</li><li><span>3</span>完成初稿后交由 {reviewer} 验收</li></ol><div><button onClick={() => startChatWith("让产品策略专家读取任务「" + task.title + "」及项目上下文，帮我判断下一步。") }><WandSparkles size={15}/> 调用产品策略专家</button><button onClick={() => openPreview({eyebrow:"运行 Skill",title:"需求分析 · " + task.title,description:"Skill 将读取任务背景、项目会议和相关资产，输出需求缺口与下一步建议。",items:[{title:"确认读取范围",detail:task.project + " · 当前任务与关联资产"},{title:"开始分析",detail:"预计 1–2 分钟，可在 AI 执行中心查看"},{title:"人工确认结果",detail:"候选行动不会直接成为正式任务"}],note:"运行记录会关联回当前任务。",primaryLabel:"进入 AI 执行中心",primaryRoute:"/agent"})}><Boxes size={15}/> 运行需求分析 Skill</button></div></section>
+            {agentRuns[0]?.output_text && <section className="task-detail-section agent-draft-result"><div className="drawer-section-title"><h3><Bot size={16}/> AI 运行草稿</h3><span>{agentRuns[0].status}</span></div><div className={"ai-mode-banner "+(agentRuns[0].execution_mode||"mock").toLowerCase()}><Sparkles size={16}/><span><strong>{agentRuns[0].execution_mode==="LIVE"?"真实 AI":agentRuns[0].execution_mode==="FALLBACK"?"降级草稿":"本地 Mock 草稿"}</strong><small>{agentRuns[0].fallback_reason||`Prompt ${agentRuns[0].prompt_version} · 尝试 ${agentRuns[0].attempt_count}/${agentRuns[0].max_attempts}`}</small></span></div><pre>{agentRuns[0].output_text}</pre><p><ShieldCheck size={14}/> AI 不会自动完成任务；负责人确认后才进入验收。</p></section>}
             {submissions.length > 0 && <section className="task-detail-section submission-history"><div className="drawer-section-title"><h3>结果版本</h3><span>{submissions.length} 个不可覆盖版本</span></div><div className="submission-version-list">{submissions.map((item) => <article key={item.id}><span>V{item.version}</span><div><strong>{item.summary || "已提交外部结果"}</strong>{item.external_url && <a href={item.external_url} target="_blank" rel="noreferrer"><Link2 size={14}/> 打开结果链接</a>}<small>提交人 {item.submitted_by} · {new Date(item.created_at).toLocaleString("zh-CN")}</small></div></article>)}</div></section>}
             <section className="task-detail-section activity-section">
               <div className="drawer-section-title"><h3>进展与协作</h3><span>{task.collaborators.length} 位协作者</span></div>
@@ -2769,6 +2790,7 @@ function TaskDetailPage() {
       </div>
       {submissionOpen && <SubmitResultModal task={task} busy={actionBusy} onClose={() => setSubmissionOpen(false)} onSubmit={async (payload) => {if (await runAction("SUBMIT", payload, "结果已提交，正在等待验收")) setSubmissionOpen(false);}}/>}
       {externalOpen && <WaitExternalModal task={task} userId={user.id} busy={actionBusy} onClose={() => setExternalOpen(false)} onSubmit={async (payload) => {if (await runAction("WAIT_EXTERNAL", payload, "任务已进入等待外部，服务端会按时提醒")) setExternalOpen(false);}}/>}
+      {aiRevisionOpen && <AppModal title="要求 AI 重做" subtitle="反馈会写入任务状态历史；任务恢复进行中后可再次启动 AI。" onClose={() => setAiRevisionOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();if (!returnReason.trim()) return;if (await runAction("REVISE_AI", {expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason:returnReason.trim(),agent_run_id:agentRuns[0]?.id||null}, "已退回 AI 草稿，任务恢复执行")) {setAiRevisionOpen(false);setReturnReason("");}}}><label><span>修改要求</span><textarea autoFocus value={returnReason} onChange={(event)=>setReturnReason(event.target.value)} placeholder="说明缺少哪些信息、哪些结论需要调整"/></label><footer className="modal-actions"><button type="button" className="button secondary" onClick={()=>setAiRevisionOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim()||actionBusy}>确认重做</button></footer></form></AppModal>}
       {returnOpen && <AppModal title="退回修改" subtitle="退回原因会进入状态历史，负责人可据此修改后再次提交。" onClose={() => setReturnOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();if (!returnReason.trim()) return;if (await runAction("RETURN", {expected_version:task.version || 1,summary:"",external_url:null,asset_reference:null,reason:returnReason.trim()}, "任务已退回负责人修改")) {setReturnOpen(false);setReturnReason("");}}}><label><span>退回原因</span><textarea autoFocus value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="请明确说明未通过的标准和需要修改的内容"/></label><small className="field-guidance">退回必须填写原因，避免负责人无依据返工。</small><footer className="modal-actions"><button type="button" className="button secondary" onClick={() => setReturnOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim() || actionBusy}>{actionBusy ? "处理中…" : "确认退回"}</button></footer></form></AppModal>}
     </div>
   );

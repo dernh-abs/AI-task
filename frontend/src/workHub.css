@@ -7879,6 +7879,11 @@ a:focus-visible {
 .activity-section .mention-composer { flex: 0 0 auto; }
 .task-detail-section .drawer-section-title h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .submission-history { grid-column: 1 / -1; }
+.agent-draft-result { grid-column: 1 / -1; }
+.agent-draft-result .drawer-section-title h3 { display: flex; align-items: center; gap: 6px; }
+.agent-draft-result .ai-mode-banner { margin-top: 12px; }
+.agent-draft-result pre { margin: 12px 0 0; padding: 14px; overflow-x: auto; border: 1px solid #e4e8ef; border-radius: 9px; background: #fafbfc; color: #3b4658; font: inherit; font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.agent-draft-result > p { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; color: var(--hub-subtle); font-size: 11px; }
 .submission-version-list { display: grid; gap: 8px; margin-top: 12px; }
 .submission-version-list article { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 11px 12px; border: 1px solid #e3e8f1; border-radius: 9px; background: #f9fafc; }
 .submission-version-list article > span { align-self: start; padding: 3px 7px; border-radius: 6px; background: #e9f0ff; color: var(--hub-blue); font-size: 12px; font-weight: 700; }

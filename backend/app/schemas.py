@@ -73,7 +73,7 @@ class TaskRead(BaseModel):
     version: int
 
 
-TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "WAIT_EXTERNAL", "RESUME_EXTERNAL", "CANCEL"]
+TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "WAIT_EXTERNAL", "RESUME_EXTERNAL", "CONFIRM_AI", "REVISE_AI", "CANCEL"]
 
 
 class TaskActionRequest(BaseModel):
@@ -87,6 +87,7 @@ class TaskActionRequest(BaseModel):
     expected_at: datetime | None = None
     internal_followup_user_id: str | None = None
     recovery_action: str | None = None
+    agent_run_id: str | None = None
 
 
 class TaskActionResponse(BaseModel):
@@ -201,3 +202,25 @@ class CandidateConfirmResponse(BaseModel):
     candidate: CandidateRead
     task: TaskRead
     idempotent_replay: bool = False
+
+
+class AgentRunRead(BaseModel):
+    id: str
+    task_id: str
+    status: str
+    execution_mode: str | None
+    degraded: bool
+    fallback_reason: str | None
+    prompt_version: str
+    attempt_count: int
+    max_attempts: int
+    output_text: str
+    error_message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+
+
+class AgentRunStartResponse(BaseModel):
+    run: AgentRunRead
+    idempotent_replay: bool

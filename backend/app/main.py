@@ -11,14 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .config import load_settings
+from .agent_runs import recover_stale_runs, start_agent_run
 from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates
-from .models import CandidateStatus, CandidateTask, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, SourceSnapshot, Task, TaskStatusHistory, TaskSubmission, TeamMember, User, utc_now
+from .models import AgentRun, CandidateStatus, CandidateTask, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, SourceSnapshot, Task, TaskStatusHistory, TaskSubmission, TeamMember, User
 from .permissions import can_read_project, readable_project_ids
-from .schemas import CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectRead, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectRead, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -40,6 +41,8 @@ async def lifespan(_: FastAPI):
     create_schema()
     if settings.seed_demo_data:
         seed_demo_data()
+    with Session(engine) as recovery_session:
+        recover_stale_runs(recovery_session)
     reminder_task = asyncio.create_task(_external_reminder_worker())
     try:
         yield
@@ -251,3 +254,25 @@ def ignore_candidate(candidate_id: str, idempotency_key: str = Header(alias="Ide
     session.commit()
     session.refresh(candidate)
     return candidate_read(candidate)
+
+
+def _agent_run_read(run: AgentRun) -> AgentRunRead:
+    return AgentRunRead(id=run.id, task_id=run.task_id, status=str(run.status), execution_mode=str(run.execution_mode) if run.execution_mode else None, degraded=run.degraded, fallback_reason=run.fallback_reason, prompt_version=run.prompt_version, attempt_count=run.attempt_count, max_attempts=run.max_attempts, output_text=run.output_text, error_message=run.error_message, started_at=run.started_at, finished_at=run.finished_at, created_at=run.created_at)
+
+
+@app.post("/api/tasks/{task_id}/agent-runs", response_model=AgentRunStartResponse)
+def create_agent_run(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> AgentRunStartResponse:
+    task = _task_for_user(task_id, user, session)
+    try:
+        run, replay = start_agent_run(session, task, user)
+    except DomainError as exc:
+        session.rollback()
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return AgentRunStartResponse(run=_agent_run_read(run), idempotent_replay=replay)
+
+
+@app.get("/api/tasks/{task_id}/agent-runs", response_model=list[AgentRunRead])
+def task_agent_runs(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[AgentRunRead]:
+    _task_for_user(task_id, user, session)
+    rows = session.exec(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.created_at.desc())).all()
+    return [_agent_run_read(run) for run in rows]

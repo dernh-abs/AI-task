@@ -11,6 +11,15 @@
 
 ## 当前阶段
 
+阶段 5：最小 AI 执行闭环已实现。
+
+- 任务负责人可创建真实 `AgentRun`，运行依次记录 `QUEUED → RUNNING → SUCCEEDED/FAILED` 与过程日志。
+- 相同任务版本和 Prompt 使用唯一请求指纹，重复启动返回原 Run，不创建重复运行。
+- 运行保存模式、降级原因、尝试次数、心跳、草稿和错误；服务启动会关闭遗留的 `RUNNING` 卡死记录。
+- AI 草稿完成后任务进入 `WAITING_HUMAN_CONFIRMATION`，不会被 AI 直接标记完成。
+- 负责人可退回重做，或人工确认后生成不可覆盖的提交版本并进入 `WAITING_REVIEW`。
+- 候选提取与任务草稿共用 Live/Mock/Fallback、超时重试、精确缓存、预算和调用日志规则。
+
 阶段 4：Model Gateway 与候选提取闭环已实现。
 
 - `AI_MODE=mock` 默认使用确定性本地提取；`live` 模式直连 Qwen，并设超时、一次重试和单项目日预算预检。

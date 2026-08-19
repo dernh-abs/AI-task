@@ -293,10 +293,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{task_id}/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Task Agent Runs */
+        get: operations["task_agent_runs_api_tasks__task_id__agent_runs_get"];
+        put?: never;
+        /** Create Agent Run */
+        post: operations["create_agent_run_api_tasks__task_id__agent_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentRunRead */
+        AgentRunRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Status */
+            status: string;
+            /** Execution Mode */
+            execution_mode: string | null;
+            /** Degraded */
+            degraded: boolean;
+            /** Fallback Reason */
+            fallback_reason: string | null;
+            /** Prompt Version */
+            prompt_version: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Output Text */
+            output_text: string;
+            /** Error Message */
+            error_message: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** AgentRunStartResponse */
+        AgentRunStartResponse: {
+            run: components["schemas"]["AgentRunRead"];
+            /** Idempotent Replay */
+            idempotent_replay: boolean;
+        };
         /** CandidateConfirmRequest */
         CandidateConfirmRequest: {
             /** Expected Version */
@@ -596,6 +654,8 @@ export interface components {
             internal_followup_user_id?: string | null;
             /** Recovery Action */
             recovery_action?: string | null;
+            /** Agent Run Id */
+            agent_run_id?: string | null;
         };
         /** TaskActionResponse */
         TaskActionResponse: {
@@ -865,7 +925,7 @@ export interface operations {
             };
             path: {
                 task_id: string;
-                action: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "WAIT_EXTERNAL" | "RESUME_EXTERNAL" | "CANCEL";
+                action: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "WAIT_EXTERNAL" | "RESUME_EXTERNAL" | "CONFIRM_AI" | "REVISE_AI" | "CANCEL";
             };
             cookie?: never;
         };
@@ -1184,6 +1244,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_agent_runs_api_tasks__task_id__agent_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_agent_run_api_tasks__task_id__agent_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunStartResponse"];
                 };
             };
             /** @description Validation Error */

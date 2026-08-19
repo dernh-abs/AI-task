@@ -164,3 +164,25 @@ def test_candidate_extraction_edit_confirm_and_idempotency() -> None:
         assert duplicate.status_code == 409
         cached = client.post("/api/candidate-extractions", headers=ceo_headers, json=extraction_payload)
         assert cached.json()["cached"] is True
+
+
+def test_agent_run_human_confirmation_and_review() -> None:
+    with TestClient(app) as client:
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        started = client.post("/api/tasks/t-mvp-1/agent-runs", headers=member_headers)
+        assert started.status_code == 200
+        run = started.json()["run"]
+        assert run["status"] == "SUCCEEDED"
+        assert run["execution_mode"] == "MOCK"
+        assert run["output_text"]
+        replay = client.post("/api/tasks/t-mvp-1/agent-runs", headers=member_headers)
+        assert replay.status_code == 200
+        assert replay.json()["idempotent_replay"] is True
+        task = next(item for item in client.get("/api/tasks", headers=member_headers).json() if item["id"] == "t-mvp-1")
+        assert task["status"] == "WAITING_HUMAN_CONFIRMATION"
+        confirmed = client.post("/api/tasks/t-mvp-1/actions/CONFIRM_AI", headers={**member_headers, "Idempotency-Key": "confirm-ai-output"}, json={"expected_version": task["version"], "agent_run_id": run["id"]})
+        assert confirmed.status_code == 200
+        assert confirmed.json()["task"]["status"] == "WAITING_REVIEW"
+        submissions = client.get("/api/tasks/t-mvp-1/submissions", headers=member_headers).json()
+        assert submissions[0]["asset_reference"] == f"agent-run:{run['id']}"
