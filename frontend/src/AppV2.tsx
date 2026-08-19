@@ -93,7 +93,19 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
+import { fetchProjects, fetchTasks, type ApiProject, type ApiTask } from "./api";
+import { useAuth } from "./auth";
 import "./workHub.css";
+
+const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
+  PENDING_OWNER_CONFIRMATION: "todo", TODO: "todo", IN_PROGRESS: "progress",
+  WAITING_EXTERNAL: "external", BLOCKED: "blocked", WAITING_HUMAN_CONFIRMATION: "confirm",
+  WAITING_REVIEW: "review", DONE: "done", CANCELED: "done",
+};
+const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
+const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
+const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3] });
+const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
   tasks: Task[];
@@ -571,8 +583,11 @@ function PageHeader({
 
 function WorkHubProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
   const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
   const [helps, setHelps] = useState<HelpRequest[]>(initialHelpRequests);
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
@@ -596,6 +611,22 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     window.localStorage.setItem("quanyi-active-team", activeTeamId);
   }, [activeTeamId]);
+
+  useEffect(() => {
+    let active = true;
+    setDataLoading(true);
+    setDataError("");
+    Promise.all([fetchProjects(), fetchTasks()]).then(([projectRows, taskRows]) => {
+      if (!active) return;
+      setProjects(projectRows.map(projectFromApi));
+      setTasks(taskRows.map(taskFromApi));
+    }).catch(() => {
+      if (active) setDataError("无法读取服务端项目数据，请确认后端已启动");
+    }).finally(() => {
+      if (active) setDataLoading(false);
+    });
+    return () => { active = false; };
+  }, [user.id]);
 
   const notify = (message: string) => {
     setToast(message);
@@ -644,7 +675,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
 
   return (
     <HubContext.Provider value={value}>
-      {children}
+      {dataLoading ? <main className="hub-data-state">正在读取项目与任务…</main> : dataError ? <main className="hub-data-state error"><AlertCircle size={20}/>{dataError}<button onClick={() => window.location.reload()}>重新加载</button></main> : children}
       {selectedCandidate && (
         <CandidateReview
           candidate={selectedCandidate}
@@ -685,12 +716,12 @@ const resourceNav = [
 
 function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile: () => void }) {
   const { activeTeamId, candidates, tasks } = useHub();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const runCount = tasks.filter((task) => task.status === "ai").length;
-  const isCeoPreview = new URLSearchParams(location.search).get("role") === "ceo";
-  const previewIdentity = isCeoPreview ? { name: "徐泉", role: "CEO" } : { name: "廖婉琛", role: "AI 产品经理" };
+  const previewIdentity = { name: user.name, role: user.role === "CEO" ? "CEO" : "团队成员" };
   const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
   return (
     <>
@@ -761,6 +792,7 @@ function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile
             <Settings size={18} />
             <span>设置</span>
           </button>
+          <button className="sidebar-signout" onClick={logout}>退出当前账号</button>
           <button className="user-card" onClick={() => navigate("/settings")} aria-label="打开个人设置">
             <Avatar name={previewIdentity.name} />
             <span>
@@ -854,10 +886,11 @@ function Shell() {
 
 function Dashboard() {
   const { tasks, candidates, activeTeamId, openTask, openCandidate, openPreview } = useHub();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
-  const dashboardView = queryParams.get("role") === "ceo" ? "ceo" : "member";
+  const dashboardView = user.role === "CEO" ? "ceo" : "member";
   const requestedExtraction = queryParams.get("extract") as ExtractionSource | null;
   const legacyMineRequest = queryParams.get("view") === "mine";
   const requestedAssigned = queryParams.get("assigned") === "1" || legacyMineRequest;
@@ -868,7 +901,7 @@ function Dashboard() {
   const [todayOpen, setTodayOpen] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState("");
   const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
-  const currentUser = "廖婉琛";
+  const currentUser = user.name;
   const personalTasks = tasks
     .filter((task) => task.owner === currentUser || task.collaborators.includes(currentUser))
     .filter((task) => !["done", "external"].includes(task.status));
@@ -2581,6 +2614,7 @@ function CandidateReview({ candidate, onClose }: { candidate: Candidate; onClose
 
 function TaskDetailPage() {
   const { tasks, setTasks, notify, addNotification, startChatWith, openPreview } = useHub();
+  const { user } = useAuth();
   const { taskId } = useParams();
   const navigate = useNavigate();
   const task = tasks.find((item) => item.id === taskId);
@@ -2592,7 +2626,7 @@ function TaskDetailPage() {
     { author: task?.owner || "任务负责人", text: "更新了下一步行动。", time: "今天 10:20" },
   ]);
   if (!task) return <EmptyState icon={<ListTodo/>} title="没有找到这个任务" description="任务可能已被归档或删除。" action={<button className="button primary" onClick={() => navigate("/tasks")}>返回任务池</button>} />;
-  const currentUser = "廖婉琛";
+  const currentUser = user.name;
   const reviewer = task.reviewer || "徐泉";
   const isTaskOwner = task.owner === currentUser;
   const isReviewer = reviewer === currentUser;

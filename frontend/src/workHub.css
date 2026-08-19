@@ -10455,3 +10455,8 @@ a:focus-visible {
 .dashboard-screen .assignment-preview-list strong {
   font-weight: var(--hub-weight-emphasis) !important;
 }
+
+.hub-data-state { min-height: 100vh; display: flex; align-items: center; justify-content: center; gap: 10px; color: #657089; background: #f6f8fc; }
+.hub-data-state.error { color: #b42318; }
+.hub-data-state button { border: 1px solid #d7deea; border-radius: 8px; padding: 8px 12px; background: white; cursor: pointer; }
+.sidebar-signout { width: 100%; border: 0; background: transparent; color: #7d8798; font-size: 11px; text-align: left; cursor: pointer; padding: 4px 10px; }

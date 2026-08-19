@@ -11,7 +11,7 @@
 
 ## 当前阶段
 
-阶段 0：冻结领域契约与验收边界。
+阶段 1：真实数据库、JWT 登录、项目权限、只读 API 与前端贯通已实现。
 
 ## 前端基线验证
 
@@ -22,10 +22,31 @@ pnpm typecheck
 pnpm build
 ```
 
+## 本地启动
+
+后端：
+
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\pip install -e ".[test]"
+.venv\Scripts\alembic upgrade head
+.venv\Scripts\uvicorn app.main:app --reload --port 8000
+```
+
+前端：
+
+```powershell
+cd frontend
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+默认成员账号：`member@quanyi.local` / `mvp-member-2026`。
+
 ## 开发原则
 
 1. 每个阶段按“数据库 → API → 权限 → 前端 → 测试 → 验收”纵向交付。
 2. 任务状态只能由服务端领域服务变更，前端不得直接假定成功。
 3. 候选确认、结果提交、验收、贡献入账和 AI 运行必须防重并保留审计。
 4. AI 输出始终标识 `LIVE`、`MOCK` 或 `FALLBACK`，不能用降级结果冒充真实模型结果。
-
