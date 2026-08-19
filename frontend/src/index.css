@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+* {
+  box-sizing: border-box;
+}
+html {
+  background: #ffffff;
+}
+body {
+  margin: 0;
+  min-width: 1080px;
+  background:
+    radial-gradient(circle at 14% 12%, rgba(219, 234, 254, 0.72), transparent 32%),
+    radial-gradient(circle at 82% 20%, rgba(224, 231, 255, 0.72), transparent 30%),
+    #ffffff;
+  color: #101828;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+svg {
+  stroke-width: 1.75;
+}
+.scrollbar::-webkit-scrollbar {
+  width: 7px;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+@layer components {
+  .panel {
+    @apply rounded-[28px] border border-slate-100 bg-white shadow-[0_22px_60px_rgba(15,23,42,.07)];
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition duration-200;
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 text-white shadow-[0_16px_34px_rgba(37,99,235,.24)] hover:-translate-y-0.5 hover:bg-blue-700;
+  }
+  .btn-secondary {
+    @apply btn border border-slate-200 bg-white text-ink shadow-sm hover:border-blue-200 hover:bg-blue-50/50 hover:text-blue-600;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-slate-500;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-white px-3 py-2.5 text-sm outline-none transition focus:border-forest focus:ring-4 focus:ring-blue-50;
+  }
+  .section-title {
+    @apply text-lg font-semibold tracking-[-.02em] text-slate-950;
+  }
+  .muted {
+    @apply text-sm text-slate-500;
+  }
+}

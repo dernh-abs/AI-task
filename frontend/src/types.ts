@@ -1,0 +1,14 @@
+export type TaskStatus='CANDIDATE'|'PENDING_OWNER_CONFIRMATION'|'TODO'|'IN_PROGRESS'|'WAITING_EXTERNAL'|'BLOCKED'|'WAITING_HUMAN_CONFIRMATION'|'WAITING_REVIEW'|'DONE'|'CANCELED';
+export type AiStatus='QUEUED'|'RUNNING'|'NEEDS_INPUT'|'FAILED'|'SUCCEEDED'|'CANCELED';
+export type ExecutionMode='HUMAN'|'AI'|'HYBRID';
+export interface User{id:string;name:string;role:string;initials:string;color:string}
+export interface Project{id:string;name:string;description:string;stage:string;ownerId:string;progress:number;risk:'低'|'中'|'高';color:string}
+export interface ExternalContact{id:string;name:string;company:string;role:string}
+export interface ExternalDependency{contactId:string;item:string;followupId:string;expectedAt?:string;noExpectedTime?:boolean;lastUpdate:string}
+export interface Task{id:string;title:string;projectId:string;ownerId:string;status:TaskStatus;priority:'低'|'中'|'高'|'紧急';mode:ExecutionMode;dueAt?:string;background:string;objective:string;deliverable:string;acceptance:string;points:number;source:string;reviewerId?:string;agentRunId?:string;external?:ExternalDependency;meetingStage?:'OWNER_REVIEW'|'EMPLOYEE_CONFIRM'|'ACCEPTED'|'RETURNED'|'RESCHEDULE'|'ERROR';result?:string;internalBlock?:boolean}
+export interface CandidateTask{id:string;title:string;sourceType:'聊天'|'会议'|'Codex'|'CLI'|'手动';sourceText:string;initiator:string;detectedAt:string;confidence:number;missing:string[];projectId:string;ownerId:string;mode:ExecutionMode;dueAt:string;background:string;objective:string;deliverable:string;acceptance:string;priority:Task['priority'];points:number;state:'ACTIVE'|'STASHED'|'IGNORED'|'CREATED';isMeeting?:boolean}
+export interface Agent{id:string;name:string;type:string;status:'在线'|'忙碌'}
+export interface AgentRun{id:string;taskId:string;agentId:string;status:AiStatus;progress:number;step:string;elapsed:string;logs:string[];files:string[];toolCalls:string[]}
+export interface HelpRequest{id:string;question:string;taskId:string;urgency:'普通'|'紧急';status:'AI_ANSWERED'|'NEEDS_EXPERT'|'HUMAN_ANSWERED'|'RESOLVED';attempted:string;aiAnswer:string;humanAnswer?:string;recommended:string[]}
+export interface ContributionRecord{id:string;userId:string;type:string;description:string;points:number;date:string}
+export interface AppState{users:User[];projects:Project[];contacts:ExternalContact[];tasks:Task[];candidates:CandidateTask[];agents:Agent[];runs:AgentRun[];helps:HelpRequest[];contributions:ContributionRecord[]}
