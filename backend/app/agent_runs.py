@@ -13,7 +13,7 @@ from .state_machine import DomainError
 PROMPT_VERSION = "task-draft-v1"
 
 
-def start_agent_run(session: Session, task: Task, actor: User) -> tuple[AgentRun, bool]:
+def start_agent_run(session: Session, task: Task, actor: User, revision_instruction: str = "") -> tuple[AgentRun, bool]:
     if task.owner_id != actor.id and actor.role != TeamRole.CEO:
         raise DomainError(403, "FORBIDDEN", "Only the task owner can start AI assistance")
     latest = session.exec(select(AgentRun).where(AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc())).first()
@@ -21,13 +21,17 @@ def start_agent_run(session: Session, task: Task, actor: User) -> tuple[AgentRun
         return latest, True
     if TaskStatus(task.status) != TaskStatus.IN_PROGRESS:
         raise DomainError(422, "INVALID_TRANSITION", "AI assistance requires an in-progress task")
-    fingerprint = hashlib.sha256(f"{task.id}:{task.version}:{PROMPT_VERSION}".encode()).hexdigest()
+    revision_instruction = revision_instruction.strip()
+    fingerprint = hashlib.sha256(f"{task.id}:{task.version}:{PROMPT_VERSION}:{revision_instruction}".encode()).hexdigest()
     existing = session.exec(select(AgentRun).where(AgentRun.request_fingerprint == fingerprint)).first()
     if existing:
         return existing, True
     run = AgentRun(id=f"run-{uuid4().hex}", task_id=task.id, requested_by=actor.id, request_fingerprint=fingerprint, status=AgentRunStatus.QUEUED, prompt_version=PROMPT_VERSION)
     session.add(run)
-    session.add(AgentRunLog(id=f"log-{uuid4().hex}", agent_run_id=run.id, level="INFO", message="运行已进入队列"))
+    queue_message = "运行已进入队列"
+    if revision_instruction:
+        queue_message += f"；已收到重做要求：{revision_instruction[:500]}"
+    session.add(AgentRunLog(id=f"log-{uuid4().hex}", agent_run_id=run.id, level="INFO", message=queue_message))
     session.commit()
     session.refresh(run)
     if not task.description.strip() or not task.deliverable.strip():
@@ -47,7 +51,10 @@ def start_agent_run(session: Session, task: Task, actor: User) -> tuple[AgentRun
     session.add(AgentRunLog(id=f"log-{uuid4().hex}", agent_run_id=run.id, level="INFO", message="正在生成任务草稿"))
     session.commit()
     try:
-        result = generate_task_draft(session, task.project_id, f"任务：{task.title}\n背景：{task.description}\n交付物：{task.deliverable}\n验收标准：{task.acceptance}")
+        task_context = f"任务：{task.title}\n背景：{task.description}\n交付物：{task.deliverable}\n验收标准：{task.acceptance}"
+        if revision_instruction:
+            task_context += f"\n\n人工重做要求（必须针对性修改，不得原样返回上一版）：\n{revision_instruction}"
+        result = generate_task_draft(session, task.project_id, task_context)
         session.refresh(task)
         if TaskStatus(task.status) != TaskStatus.IN_PROGRESS:
             raise DomainError(409, "TASK_CHANGED", "Task changed while AI was running")

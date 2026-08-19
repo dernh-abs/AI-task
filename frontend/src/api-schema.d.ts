@@ -403,6 +403,14 @@ export interface components {
              */
             created_at: string;
         };
+        /** AgentRunStartRequest */
+        AgentRunStartRequest: {
+            /**
+             * Revision Instruction
+             * @default
+             */
+            revision_instruction: string;
+        };
         /** AgentRunStartResponse */
         AgentRunStartResponse: {
             run: components["schemas"]["AgentRunRead"];
@@ -1638,7 +1646,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AgentRunStartRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

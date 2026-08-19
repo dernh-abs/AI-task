@@ -19,7 +19,7 @@ from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates
 from .models import AgentRun, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User
 from .permissions import can_read_project, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectCreateRequest, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectCreateRequest, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -344,10 +344,10 @@ def _agent_run_read(run: AgentRun) -> AgentRunRead:
 
 
 @app.post("/api/tasks/{task_id}/agent-runs", response_model=AgentRunStartResponse)
-def create_agent_run(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> AgentRunStartResponse:
+def create_agent_run(task_id: str, payload: AgentRunStartRequest | None = None, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> AgentRunStartResponse:
     task = _task_for_user(task_id, user, session)
     try:
-        run, replay = start_agent_run(session, task, user)
+        run, replay = start_agent_run(session, task, user, payload.revision_instruction if payload else "")
     except DomainError as exc:
         session.rollback()
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc

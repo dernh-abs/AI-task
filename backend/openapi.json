@@ -1033,6 +1033,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentRunStartRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1276,6 +1293,18 @@
           "created_at"
         ],
         "title": "AgentRunRead"
+      },
+      "AgentRunStartRequest": {
+        "properties": {
+          "revision_instruction": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Revision Instruction",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "AgentRunStartRequest"
       },
       "AgentRunStartResponse": {
         "properties": {

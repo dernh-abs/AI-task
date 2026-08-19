@@ -198,11 +198,25 @@ def test_agent_run_human_confirmation_and_review() -> None:
         assert replay.json()["idempotent_replay"] is True
         task = next(item for item in client.get("/api/tasks", headers=member_headers).json() if item["id"] == "t-mvp-1")
         assert task["status"] == "WAITING_HUMAN_CONFIRMATION"
-        confirmed = client.post("/api/tasks/t-mvp-1/actions/CONFIRM_AI", headers={**member_headers, "Idempotency-Key": "confirm-ai-output"}, json={"expected_version": task["version"], "agent_run_id": run["id"]})
+        revision_instruction = "压缩为三点，并补充风险和验收标准"
+        revised = client.post("/api/tasks/t-mvp-1/actions/REVISE_AI", headers={**member_headers, "Idempotency-Key": "revise-ai-output"}, json={"expected_version": task["version"], "agent_run_id": run["id"], "reason": revision_instruction})
+        assert revised.status_code == 200
+        assert revised.json()["task"]["status"] == "IN_PROGRESS"
+        rerun = client.post("/api/tasks/t-mvp-1/agent-runs", headers=member_headers, json={"revision_instruction": revision_instruction})
+        assert rerun.status_code == 200
+        revised_run = rerun.json()["run"]
+        assert revised_run["id"] != run["id"]
+        assert revision_instruction in revised_run["output_text"]
+        assert rerun.json()["idempotent_replay"] is False
+        rerun_replay = client.post("/api/tasks/t-mvp-1/agent-runs", headers=member_headers, json={"revision_instruction": revision_instruction})
+        assert rerun_replay.json()["idempotent_replay"] is True
+        task = next(item for item in client.get("/api/tasks", headers=member_headers).json() if item["id"] == "t-mvp-1")
+        assert task["status"] == "WAITING_HUMAN_CONFIRMATION"
+        confirmed = client.post("/api/tasks/t-mvp-1/actions/CONFIRM_AI", headers={**member_headers, "Idempotency-Key": "confirm-ai-output"}, json={"expected_version": task["version"], "agent_run_id": revised_run["id"]})
         assert confirmed.status_code == 200
         assert confirmed.json()["task"]["status"] == "WAITING_REVIEW"
         submissions = client.get("/api/tasks/t-mvp-1/submissions", headers=member_headers).json()
-        assert submissions[0]["asset_reference"] == f"agent-run:{run['id']}"
+        assert submissions[0]["asset_reference"] == f"agent-run:{revised_run['id']}"
 
 
 def test_project_stage_task_crud_and_weighted_aggregation() -> None:

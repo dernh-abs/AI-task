@@ -43,6 +43,6 @@ export const createCandidateExtraction=(payload:components["schemas"]["Candidate
 export const updateCandidate=(candidateId:string,payload:components["schemas"]["CandidateUpdateRequest"])=>request<ApiCandidate>(`/candidates/${candidateId}`,{method:"PATCH",body:JSON.stringify(payload)});
 export const confirmCandidate=(candidateId:string,expectedVersion:number,idempotencyKey=crypto.randomUUID())=>request<components["schemas"]["CandidateConfirmResponse"]>(`/candidates/${candidateId}/confirm`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({expected_version:expectedVersion})});
 export const ignoreCandidate=(candidateId:string,idempotencyKey=crypto.randomUUID())=>request<ApiCandidate>(`/candidates/${candidateId}/ignore`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey}});
-export const startAgentRun=(taskId:string)=>request<components["schemas"]["AgentRunStartResponse"]>(`/tasks/${taskId}/agent-runs`,{method:"POST"});
+export const startAgentRun=(taskId:string,revisionInstruction="")=>request<components["schemas"]["AgentRunStartResponse"]>(`/tasks/${taskId}/agent-runs`,{method:"POST",body:JSON.stringify({revision_instruction:revisionInstruction})});
 export const fetchAgentRuns=(taskId:string)=>request<ApiAgentRun[]>(`/tasks/${taskId}/agent-runs`);
 export const fetchContributions=()=>request<ApiContribution[]>("/contributions");

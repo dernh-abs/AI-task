@@ -233,6 +233,10 @@ class AgentRunRead(ApiModel):
     created_at: datetime
 
 
+class AgentRunStartRequest(ApiModel):
+    revision_instruction: str = Field(default="", max_length=2000)
+
+
 class AgentRunStartResponse(ApiModel):
     run: AgentRunRead
     idempotent_replay: bool

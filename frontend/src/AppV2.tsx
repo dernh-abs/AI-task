@@ -2720,16 +2720,44 @@ function TaskDetailPage() {
   };
   const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_EXTERNAL" ? "已收到反馈，恢复执行" : task.apiStatus === "WAITING_HUMAN_CONFIRMATION" ? "确认 AI 草稿并提交验收" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
   const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
-  const startAiAssistance = async () => {
+  const generateAiDraft = async (revisionInstruction = "") => {
     setActionBusy(true);
     setAiBusy(true);
     try {
-      const result = await startAgentRun(task.id);
+      const result = await startAgentRun(task.id, revisionInstruction);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
       setTasks((await fetchTasks()).map(taskFromApi));
       notify(result.run.execution_mode === "FALLBACK" ? "AI Live 调用失败，已生成明确标识的降级草稿" : "AI 草稿已生成，等待你人工确认");
+      return true;
     } catch (reason) {
       notify(reason instanceof ApiError ? reason.message : "AI 运行启动失败");
+      return false;
+    } finally {
+      setAiBusy(false);
+      setActionBusy(false);
+    }
+  };
+  const startAiAssistance = () => { void generateAiDraft(); };
+  const reviseAiDraft = async (feedback: string) => {
+    setActionBusy(true);
+    setAiBusy(true);
+    let revisionSaved = false;
+    try {
+      const revised = await performTaskAction(task.id, "REVISE_AI", {expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason:feedback,agent_run_id:agentRuns[0]?.id||null});
+      revisionSaved = true;
+      replaceTask(revised.task);
+      setAiRevisionOpen(false);
+      setReturnReason("");
+      const result = await startAgentRun(task.id, feedback);
+      setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
+      setTasks((await fetchTasks()).map(taskFromApi));
+      notify(result.run.execution_mode === "FALLBACK" ? "重做要求已保存；Live 调用失败，已生成降级草稿" : "AI 已按修改要求生成新草稿，等待你确认");
+    } catch (reason) {
+      if (revisionSaved) {
+        notify("修改要求已保存，但 AI 重新生成失败；任务已恢复进行中，可点击“AI 协助生成草稿”重试");
+      } else {
+        notify(reason instanceof ApiError ? reason.message : "重做请求未完成，请刷新后重试");
+      }
     } finally {
       setAiBusy(false);
       setActionBusy(false);
@@ -2812,7 +2840,7 @@ function TaskDetailPage() {
       </div>
       {submissionOpen && <SubmitResultModal task={task} busy={actionBusy} onClose={() => setSubmissionOpen(false)} onSubmit={async (payload) => {if (await runAction("SUBMIT", payload, "结果已提交，正在等待验收")) setSubmissionOpen(false);}}/>}
       {externalOpen && <WaitExternalModal task={task} userId={user.id} busy={actionBusy} onClose={() => setExternalOpen(false)} onSubmit={async (payload) => {if (await runAction("WAIT_EXTERNAL", payload, "任务已进入等待外部，服务端会按时提醒")) setExternalOpen(false);}}/>}
-      {aiRevisionOpen && <AppModal title="要求 AI 重做" subtitle="反馈会写入任务状态历史；任务恢复进行中后可再次启动 AI。" onClose={() => setAiRevisionOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();if (!returnReason.trim()) return;if (await runAction("REVISE_AI", {expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason:returnReason.trim(),agent_run_id:agentRuns[0]?.id||null}, "已退回 AI 草稿，任务恢复执行")) {setAiRevisionOpen(false);setReturnReason("");}}}><label><span>修改要求</span><textarea autoFocus value={returnReason} onChange={(event)=>setReturnReason(event.target.value)} placeholder="说明缺少哪些信息、哪些结论需要调整"/></label><footer className="modal-actions"><button type="button" className="button secondary" onClick={()=>setAiRevisionOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim()||actionBusy}>确认重做</button></footer></form></AppModal>}
+      {aiRevisionOpen && <AppModal title="要求 AI 重做" subtitle="提交后会保存修改要求，并立即调用 AI 生成一版新草稿。" onClose={() => setAiRevisionOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();const feedback=returnReason.trim();if (!feedback) return;await reviseAiDraft(feedback);}}><label><span>修改要求</span><textarea autoFocus value={returnReason} onChange={(event)=>setReturnReason(event.target.value)} placeholder="说明缺少哪些信息、哪些结论需要调整"/></label><small className="field-guidance">修改要求会进入 AI 上下文，新草稿生成后将替换当前展示。</small><footer className="modal-actions"><button type="button" className="button secondary" disabled={actionBusy} onClick={()=>setAiRevisionOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim()||actionBusy}>{actionBusy ? "AI 正在重新生成…" : "确认并重新生成"}</button></footer></form></AppModal>}
       {returnOpen && <AppModal title="退回修改" subtitle="退回原因会进入状态历史，负责人可据此修改后再次提交。" onClose={() => setReturnOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();if (!returnReason.trim()) return;if (await runAction("RETURN", {expected_version:task.version || 1,summary:"",external_url:null,asset_reference:null,reason:returnReason.trim()}, "任务已退回负责人修改")) {setReturnOpen(false);setReturnReason("");}}}><label><span>退回原因</span><textarea autoFocus value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="请明确说明未通过的标准和需要修改的内容"/></label><small className="field-guidance">退回必须填写原因，避免负责人无依据返工。</small><footer className="modal-actions"><button type="button" className="button secondary" onClick={() => setReturnOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim() || actionBusy}>{actionBusy ? "处理中…" : "确认退回"}</button></footer></form></AppModal>}
     </div>
   );
