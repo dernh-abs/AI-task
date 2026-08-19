@@ -3217,11 +3217,11 @@ a:focus-visible {
 
 .project-chat-main > header {
   display: flex;
-  height: 64px;
-  flex: 0 0 64px;
+  min-height: 88px;
+  flex: 0 0 auto;
   align-items: center;
   gap: 9px;
-  padding: 0 17px;
+  padding: 10px 17px;
   border-bottom: 1px solid var(--hub-line);
 }
 
@@ -3250,12 +3250,16 @@ a:focus-visible {
 
 .project-chat-main > header strong {
   font-size: 14px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .project-chat-main > header small {
   margin-top: 3px;
   color: var(--hub-subtle);
   font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .chat-messages {
@@ -3370,8 +3374,8 @@ a:focus-visible {
 
 .project-handoff-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 11px;
   margin: 14px 0 14px 31px;
   padding: 13px;
@@ -3418,7 +3422,9 @@ a:focus-visible {
 
 .handoff-actions {
   display: flex;
+  grid-column: 2;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
