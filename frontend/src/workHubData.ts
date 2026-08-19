@@ -25,6 +25,9 @@ export type Task = {
   progress: number;
   description: string;
   deliverable: string;
+  acceptance?: string;
+  apiStatus?: "PENDING_OWNER_CONFIRMATION" | "TODO" | "IN_PROGRESS" | "WAITING_EXTERNAL" | "BLOCKED" | "WAITING_HUMAN_CONFIRMATION" | "WAITING_REVIEW" | "DONE" | "CANCELED";
+  version?: number;
   reviewer?: string;
   blockedReason?: string;
   source: string;

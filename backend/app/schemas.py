@@ -71,3 +71,43 @@ class TaskRead(BaseModel):
     due_at: datetime | None
     source: str
     version: int
+
+
+TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "CANCEL"]
+
+
+class TaskActionRequest(BaseModel):
+    expected_version: int
+    summary: str = ""
+    external_url: str | None = None
+    asset_reference: str | None = None
+    reason: str = ""
+
+
+class TaskActionResponse(BaseModel):
+    task: TaskRead
+    idempotent_replay: bool = False
+
+
+class SubmissionRead(BaseModel):
+    id: str
+    task_id: str
+    version: int
+    submitted_by: str
+    submitter_name: str
+    summary: str
+    external_url: str | None
+    asset_reference: str | None
+    created_at: datetime
+
+
+class StatusHistoryRead(BaseModel):
+    id: str
+    task_id: str
+    from_status: str
+    to_status: str
+    actor_id: str
+    actor_name: str
+    action: str
+    reason: str
+    created_at: datetime

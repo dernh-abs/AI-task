@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Text
+from sqlalchemy import Column, String, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -118,3 +118,44 @@ class Task(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
+
+class TaskSubmission(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("task_id", "version", name="uq_task_submission_version"),)
+
+    id: str = Field(primary_key=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    version: int
+    submitted_by: str = Field(foreign_key="user.id")
+    summary: str = Field(default="", sa_column=Column(Text, nullable=False))
+    external_url: str | None = None
+    asset_reference: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class TaskStatusHistory(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    from_status: str
+    to_status: str
+    actor_id: str = Field(foreign_key="user.id")
+    action: str
+    reason: str = Field(default="", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AuditEvent(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    actor_id: str = Field(foreign_key="user.id", index=True)
+    resource_type: str
+    resource_id: str = Field(index=True)
+    action: str
+    detail_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class IdempotencyRecord(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    actor_id: str = Field(foreign_key="user.id")
+    resource_id: str
+    action: str
+    created_at: datetime = Field(default_factory=utc_now)

@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { fetchProjects, fetchTasks, type ApiProject, type ApiTask } from "./api";
+import { ApiError, fetchProjects, fetchTaskSubmissions, fetchTasks, performTaskAction, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -105,7 +105,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
 const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3] });
-const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
+const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
   tasks: Task[];
@@ -2612,6 +2612,13 @@ function CandidateReview({ candidate, onClose }: { candidate: Candidate; onClose
   );
 }
 
+function SubmitResultModal({ task, busy, onClose, onSubmit }: { task: Task; busy: boolean; onClose: () => void; onSubmit: (payload: ApiTaskActionRequest) => void }) {
+  const [summary, setSummary] = useState("");
+  const [externalUrl, setExternalUrl] = useState("");
+  const valid = Boolean(summary.trim() || externalUrl.trim());
+  return <AppModal title="提交任务结果" subtitle="提交后进入待验收；本次内容会保存为不可覆盖的版本。" onClose={onClose} size="lg"><form className="form-stack" onSubmit={(event) => {event.preventDefault();if(valid)onSubmit({expected_version:task.version || 1,summary:summary.trim(),external_url:externalUrl.trim() || null,asset_reference:null,reason:""});}}><div className="permission-note"><ShieldCheck size={17}/><span>验收标准：{task.acceptance || task.deliverable}</span></div><label><span>结果说明</span><textarea autoFocus value={summary} onChange={(event) => setSummary(event.target.value)} placeholder="说明完成了什么、关键结论和仍需关注的事项"/></label><label><span>结果链接（可选）</span><input value={externalUrl} onChange={(event) => setExternalUrl(event.target.value)} placeholder="https://..."/></label><small className="field-guidance">结果说明或链接至少填写一项，不能空提交。</small><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!valid || busy}>{busy?"正在提交…":"提交验收"}</button></footer></form></AppModal>;
+}
+
 function TaskDetailPage() {
   const { tasks, setTasks, notify, addNotification, startChatWith, openPreview } = useHub();
   const { user } = useAuth();
@@ -2621,36 +2628,57 @@ function TaskDetailPage() {
   const [comment, setComment] = useState("");
   const [mentionMenu, setMentionMenu] = useState(false);
   const [reviewReminderSent, setReviewReminderSent] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [submissionOpen, setSubmissionOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState("");
+  const [submissions, setSubmissions] = useState<ApiSubmission[]>([]);
   const [activities, setActivities] = useState([
     { author: "AI 助手", text: "已根据项目上下文补充了执行建议。", time: "10 分钟前" },
     { author: task?.owner || "任务负责人", text: "更新了下一步行动。", time: "今天 10:20" },
   ]);
+  useEffect(() => {
+    if (!taskId) return;
+    fetchTaskSubmissions(taskId).then(setSubmissions).catch(() => setSubmissions([]));
+  }, [taskId]);
   if (!task) return <EmptyState icon={<ListTodo/>} title="没有找到这个任务" description="任务可能已被归档或删除。" action={<button className="button primary" onClick={() => navigate("/tasks")}>返回任务池</button>} />;
   const currentUser = user.name;
   const reviewer = task.reviewer || "徐泉";
   const isTaskOwner = task.owner === currentUser;
   const isReviewer = reviewer === currentUser;
-  const updateStatus = (status: TaskStatus, message: string, extra: Partial<Task> = {}) => {
-    setTasks((items) => items.map((item) => item.id === task.id ? { ...item, status, ...extra } : item));
-    notify(message);
+  const replaceTask = (apiTask: ApiTask) => {
+    setTasks((items) => items.map((item) => item.id === apiTask.id ? taskFromApi(apiTask) : item));
   };
-  const action = () => {
-    if (task.status === "todo") updateStatus("progress", "任务已开始", { progress: 10, nextAction: "推进第一步工作" });
-    else if (task.status === "progress") updateStatus("ai", "已交给 AI 执行，可在执行中心查看", { mode: "hybrid", progress: 18, nextAction: "AI 正在读取项目上下文" });
-    else if (task.status === "ai") navigate("/agent?run=run-" + task.id);
-    else if (task.status === "confirm") updateStatus("review", "AI 结果已确认，进入验收", { progress: 100, nextAction: "等待验收人确认交付物" });
-    else if (task.status === "review" && isReviewer) updateStatus("done", "任务已验收完成，贡献记录已更新", { progress: 100, nextAction: "已完成并归档" });
-    else if (task.status === "review" && isTaskOwner && !reviewReminderSent) {
+  const runAction = async (actionName: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "CANCEL", payload: ApiTaskActionRequest, successMessage: string) => {
+    setActionBusy(true);
+    try {
+      const result = await performTaskAction(task.id, actionName, payload);
+      replaceTask(result.task);
+      setSubmissions(await fetchTaskSubmissions(task.id));
+      notify(successMessage);
+      return true;
+    } catch (reason) {
+      notify(reason instanceof ApiError ? reason.message : "操作未完成，请刷新后重试");
+      return false;
+    } finally {
+      setActionBusy(false);
+    }
+  };
+  const action = async () => {
+    if (task.apiStatus === "PENDING_OWNER_CONFIRMATION") await runAction("ACCEPT", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已接收");
+    else if (task.apiStatus === "TODO") await runAction("START", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已开始");
+    else if (task.apiStatus === "IN_PROGRESS") setSubmissionOpen(true);
+    else if (task.apiStatus === "WAITING_REVIEW" && isReviewer) await runAction("APPROVE", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已验收完成");
+    else if (task.apiStatus === "WAITING_REVIEW" && isTaskOwner && !reviewReminderSent) {
       addNotification({ kind: "task", title: `${task.owner}提醒你验收任务`, detail: `${task.title} · 交付物：${task.deliverable}`, taskId: task.id });
       setActivities((items) => [...items, { author: currentUser, text: `已提醒 @${reviewer} 验收交付物「${task.deliverable}」`, time: "刚刚" }]);
       setReviewReminderSent(true);
       notify(`已提醒 ${reviewer} 验收，对方已收到任务通知`);
     }
-    else if (task.status === "external") updateStatus("progress", "已收到外部资料，任务恢复执行", { nextAction: "检查客户资料并继续推进" });
     else if (task.status === "blocked") navigate("/help");
   };
-  const actionLabel = task.status === "todo" ? "开始任务" : task.status === "progress" ? "交给 AI 协助" : task.status === "ai" ? "查看 AI 执行" : task.status === "confirm" ? "确认 AI 结果" : task.status === "review" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "external" ? "已收到资料，恢复执行" : task.status === "blocked" ? "发起求助" : "已完成";
-  const actionDisabled = task.status === "done" || (task.status === "review" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
+  const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
+  const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
   const insertMention = (name: string) => {
     setComment((value) => value.replace(/@[^@\s]*$/, "@" + name + " "));
     setMentionMenu(false);
@@ -2659,7 +2687,7 @@ function TaskDetailPage() {
     event.preventDefault();
     if (!comment.trim()) return;
     const mentioned = teamMembers.filter((name) => comment.includes("@" + name));
-    setActivities((items) => [...items, { author: "廖婉琛", text: comment.trim(), time: "刚刚" }]);
+    setActivities((items) => [...items, { author: currentUser, text: comment.trim(), time: "刚刚" }]);
     if (mentioned.length) {
       setTasks((items) => items.map((item) => item.id === task.id ? { ...item, collaborators: Array.from(new Set([...item.collaborators, ...mentioned])) } : item));
       notify("已通知 " + mentioned.join("、") + "，对方可直接打开这条协作消息");
@@ -2676,7 +2704,7 @@ function TaskDetailPage() {
         <div className="task-detail-heading">
           <div><span><NavLink to="/tasks">任务池</NavLink><ChevronRight size={13}/>{task.project}</span><h1>{task.title}</h1></div>
           <div className="task-detail-header-actions">
-            {task.status === "progress" && <button className="button secondary" onClick={() => updateStatus("external", "任务已转为等待外部", { nextAction: "等待客户回复" })}><Clock3 size={16}/> 等待外部</button>}
+            {task.apiStatus === "WAITING_REVIEW" && isReviewer && <button className="button secondary" disabled={actionBusy} onClick={() => setReturnOpen(true)}><ArrowLeft size={16}/> 退回修改</button>}
             <button disabled={actionDisabled} className={"button primary " + (actionDisabled ? "disabled" : "")} onClick={action}>{task.status === "ai" ? <Activity size={16}/> : task.status === "review" && isTaskOwner ? <Bell size={16}/> : <ArrowRight size={16}/>} {actionLabel}</button>
           </div>
         </div>
@@ -2698,6 +2726,7 @@ function TaskDetailPage() {
 
           <div className="task-detail-lower">
             <section className="task-detail-section ai-suggestion"><h2><Sparkles size={17}/> AI 建议</h2><ol><li><span>1</span>先确认当前交付物的判断标准</li><li><span>2</span>读取项目最近会议与相关资产</li><li><span>3</span>完成初稿后交由 {reviewer} 验收</li></ol><div><button onClick={() => startChatWith("让产品策略专家读取任务「" + task.title + "」及项目上下文，帮我判断下一步。") }><WandSparkles size={15}/> 调用产品策略专家</button><button onClick={() => openPreview({eyebrow:"运行 Skill",title:"需求分析 · " + task.title,description:"Skill 将读取任务背景、项目会议和相关资产，输出需求缺口与下一步建议。",items:[{title:"确认读取范围",detail:task.project + " · 当前任务与关联资产"},{title:"开始分析",detail:"预计 1–2 分钟，可在 AI 执行中心查看"},{title:"人工确认结果",detail:"候选行动不会直接成为正式任务"}],note:"运行记录会关联回当前任务。",primaryLabel:"进入 AI 执行中心",primaryRoute:"/agent"})}><Boxes size={15}/> 运行需求分析 Skill</button></div></section>
+            {submissions.length > 0 && <section className="task-detail-section submission-history"><div className="drawer-section-title"><h3>结果版本</h3><span>{submissions.length} 个不可覆盖版本</span></div><div className="submission-version-list">{submissions.map((item) => <article key={item.id}><span>V{item.version}</span><div><strong>{item.summary || "已提交外部结果"}</strong>{item.external_url && <a href={item.external_url} target="_blank" rel="noreferrer"><Link2 size={14}/> 打开结果链接</a>}<small>提交人 {item.submitted_by} · {new Date(item.created_at).toLocaleString("zh-CN")}</small></div></article>)}</div></section>}
             <section className="task-detail-section activity-section">
               <div className="drawer-section-title"><h3>进展与协作</h3><span>{task.collaborators.length} 位协作者</span></div>
               <div className="task-activity-feed">{activities.map((activity, index) => <div className="activity-item" key={activity.author + index}><Avatar name={activity.author} size="sm"/><p><strong>{activity.author}</strong><span><MentionText text={activity.text}/></span><small>{activity.time}</small></p></div>)}</div>
@@ -2720,6 +2749,8 @@ function TaskDetailPage() {
           </section>
         </aside>
       </div>
+      {submissionOpen && <SubmitResultModal task={task} busy={actionBusy} onClose={() => setSubmissionOpen(false)} onSubmit={async (payload) => {if (await runAction("SUBMIT", payload, "结果已提交，正在等待验收")) setSubmissionOpen(false);}}/>}
+      {returnOpen && <AppModal title="退回修改" subtitle="退回原因会进入状态历史，负责人可据此修改后再次提交。" onClose={() => setReturnOpen(false)}><form className="form-stack" onSubmit={async (event) => {event.preventDefault();if (!returnReason.trim()) return;if (await runAction("RETURN", {expected_version:task.version || 1,summary:"",external_url:null,asset_reference:null,reason:returnReason.trim()}, "任务已退回负责人修改")) {setReturnOpen(false);setReturnReason("");}}}><label><span>退回原因</span><textarea autoFocus value={returnReason} onChange={(event) => setReturnReason(event.target.value)} placeholder="请明确说明未通过的标准和需要修改的内容"/></label><small className="field-guidance">退回必须填写原因，避免负责人无依据返工。</small><footer className="modal-actions"><button type="button" className="button secondary" onClick={() => setReturnOpen(false)}>取消</button><button className="button primary" disabled={!returnReason.trim() || actionBusy}>{actionBusy ? "处理中…" : "确认退回"}</button></footer></form></AppModal>}
     </div>
   );
 }

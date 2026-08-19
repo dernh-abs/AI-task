@@ -213,6 +213,183 @@
           }
         }
       }
+    },
+    "/api/tasks/{task_id}/actions/{action}": {
+      "post": {
+        "summary": "Task Action",
+        "operationId": "task_action_api_tasks__task_id__actions__action__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "ACCEPT",
+                "START",
+                "SUBMIT",
+                "APPROVE",
+                "RETURN",
+                "CANCEL"
+              ],
+              "type": "string",
+              "title": "Action"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/submissions": {
+      "get": {
+        "summary": "Task Submissions",
+        "operationId": "task_submissions_api_tasks__task_id__submissions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubmissionRead"
+                  },
+                  "title": "Response Task Submissions Api Tasks  Task Id  Submissions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{task_id}/history": {
+      "get": {
+        "summary": "Task History",
+        "operationId": "task_history_api_tasks__task_id__history_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StatusHistoryRead"
+                  },
+                  "title": "Response Task History Api Tasks  Task Id  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -382,6 +559,190 @@
           "DONE"
         ],
         "title": "StageStatus"
+      },
+      "StatusHistoryRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "from_status": {
+            "type": "string",
+            "title": "From Status"
+          },
+          "to_status": {
+            "type": "string",
+            "title": "To Status"
+          },
+          "actor_id": {
+            "type": "string",
+            "title": "Actor Id"
+          },
+          "actor_name": {
+            "type": "string",
+            "title": "Actor Name"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "from_status",
+          "to_status",
+          "actor_id",
+          "actor_name",
+          "action",
+          "reason",
+          "created_at"
+        ],
+        "title": "StatusHistoryRead"
+      },
+      "SubmissionRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "submitted_by": {
+            "type": "string",
+            "title": "Submitted By"
+          },
+          "submitter_name": {
+            "type": "string",
+            "title": "Submitter Name"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Url"
+          },
+          "asset_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Reference"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "task_id",
+          "version",
+          "submitted_by",
+          "submitter_name",
+          "summary",
+          "external_url",
+          "asset_reference",
+          "created_at"
+        ],
+        "title": "SubmissionRead"
+      },
+      "TaskActionRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "title": "Expected Version"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "external_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Url"
+          },
+          "asset_reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Reference"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "TaskActionRequest"
+      },
+      "TaskActionResponse": {
+        "properties": {
+          "task": {
+            "$ref": "#/components/schemas/TaskRead"
+          },
+          "idempotent_replay": {
+            "type": "boolean",
+            "title": "Idempotent Replay",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "task"
+        ],
+        "title": "TaskActionResponse"
       },
       "TaskRead": {
         "properties": {

@@ -106,6 +106,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tasks/{task_id}/actions/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Task Action */
+        post: operations["task_action_api_tasks__task_id__actions__action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Task Submissions */
+        get: operations["task_submissions_api_tasks__task_id__submissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Task History */
+        get: operations["task_history_api_tasks__task_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -174,6 +225,82 @@ export interface components {
          * @enum {string}
          */
         StageStatus: "PLANNED" | "ACTIVE" | "WAITING_REVIEW" | "DONE";
+        /** StatusHistoryRead */
+        StatusHistoryRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** From Status */
+            from_status: string;
+            /** To Status */
+            to_status: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Name */
+            actor_name: string;
+            /** Action */
+            action: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SubmissionRead */
+        SubmissionRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** Version */
+            version: number;
+            /** Submitted By */
+            submitted_by: string;
+            /** Submitter Name */
+            submitter_name: string;
+            /** Summary */
+            summary: string;
+            /** External Url */
+            external_url: string | null;
+            /** Asset Reference */
+            asset_reference: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** TaskActionRequest */
+        TaskActionRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** External Url */
+            external_url?: string | null;
+            /** Asset Reference */
+            asset_reference?: string | null;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
+        /** TaskActionResponse */
+        TaskActionResponse: {
+            task: components["schemas"]["TaskRead"];
+            /**
+             * Idempotent Replay
+             * @default false
+             */
+            idempotent_replay: boolean;
+        };
         /** TaskRead */
         TaskRead: {
             /** Id */
@@ -412,6 +539,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_action_api_tasks__task_id__actions__action__post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+                action: "ACCEPT" | "START" | "SUBMIT" | "APPROVE" | "RETURN" | "CANCEL";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_submissions_api_tasks__task_id__submissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmissionRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    task_history_api_tasks__task_id__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusHistoryRead"][];
                 };
             };
             /** @description Validation Error */

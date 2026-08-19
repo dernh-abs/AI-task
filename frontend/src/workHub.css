@@ -7869,6 +7869,14 @@ a:focus-visible {
 .task-activity-feed { min-height: 0; flex: 1 1 auto; overflow-y: auto; scrollbar-width: thin; }
 .activity-section .mention-composer { flex: 0 0 auto; }
 .task-detail-section .drawer-section-title h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.submission-history { grid-column: 1 / -1; }
+.submission-version-list { display: grid; gap: 8px; margin-top: 12px; }
+.submission-version-list article { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px; padding: 11px 12px; border: 1px solid #e3e8f1; border-radius: 9px; background: #f9fafc; }
+.submission-version-list article > span { align-self: start; padding: 3px 7px; border-radius: 6px; background: #e9f0ff; color: var(--hub-blue); font-size: 12px; font-weight: 700; }
+.submission-version-list article > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.submission-version-list strong { color: #364154; font-size: 13px; font-weight: 500; line-height: 1.6; white-space: pre-wrap; }
+.submission-version-list a { display: inline-flex; width: fit-content; align-items: center; gap: 5px; color: var(--hub-blue); font-size: 12px; }
+.submission-version-list small { color: var(--hub-subtle); font-size: 11px; }
 .task-detail-page .activity-item { align-items: center; padding: 5px 0; }
 .task-detail-page .activity-item p { display: grid; min-width: 0; flex: 1; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; }
 .task-detail-page .activity-item span { min-width: 0; margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

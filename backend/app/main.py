@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .config import load_settings
 from .database import create_schema, get_session
 from .dependencies import get_current_user
-from .models import Project, User
+from .models import Project, Task, TaskStatusHistory, TaskSubmission, User
 from .permissions import can_read_project, readable_project_ids
-from .schemas import LoginRequest, ProjectRead, TaskRead, TokenResponse, UserRead
+from .schemas import LoginRequest, ProjectRead, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
+from .state_machine import DomainError, apply_task_action
 
 
 settings = load_settings()
@@ -75,3 +76,49 @@ def list_tasks(project_id: str | None = None, user: User = Depends(get_current_u
         allowed = [project_id]
     return task_reads(session, allowed)
 
+
+def _task_for_user(task_id: str, user: User, session: Session) -> Task:
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.project_id not in readable_project_ids(session, user):
+        raise HTTPException(status_code=403, detail="Task access denied")
+    return task
+
+
+def _task_read(session: Session, task: Task) -> TaskRead:
+    return next(item for item in task_reads(session, [task.project_id]) if item.id == task.id)
+
+
+@app.post("/api/tasks/{task_id}/actions/{action}", response_model=TaskActionResponse)
+def task_action(
+    task_id: str,
+    action: TaskAction,
+    payload: TaskActionRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> TaskActionResponse:
+    task = _task_for_user(task_id, user, session)
+    try:
+        replay = apply_task_action(session, task, action, user, payload, idempotency_key)
+    except DomainError as exc:
+        session.rollback()
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return TaskActionResponse(task=_task_read(session, task), idempotent_replay=replay)
+
+
+@app.get("/api/tasks/{task_id}/submissions", response_model=list[SubmissionRead])
+def task_submissions(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[SubmissionRead]:
+    _task_for_user(task_id, user, session)
+    names = {item.id: item.name for item in session.exec(select(User)).all()}
+    rows = session.exec(select(TaskSubmission).where(TaskSubmission.task_id == task_id).order_by(TaskSubmission.version.desc())).all()
+    return [SubmissionRead(**row.model_dump(), submitter_name=names.get(row.submitted_by, "未指定")) for row in rows]
+
+
+@app.get("/api/tasks/{task_id}/history", response_model=list[StatusHistoryRead])
+def task_history(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[StatusHistoryRead]:
+    _task_for_user(task_id, user, session)
+    names = {item.id: item.name for item in session.exec(select(User)).all()}
+    rows = session.exec(select(TaskStatusHistory).where(TaskStatusHistory.task_id == task_id).order_by(TaskStatusHistory.created_at.desc())).all()
+    return [StatusHistoryRead(**row.model_dump(), actor_name=names.get(row.actor_id, "未指定")) for row in rows]
