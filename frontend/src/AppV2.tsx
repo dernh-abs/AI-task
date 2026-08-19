@@ -916,34 +916,20 @@ function Dashboard() {
   const pendingDistributionCount = Object.values(extractionBatches)
     .flatMap((batch) => batch.tasks)
     .filter((task) => task.status === "待负责人确认").length;
-  const managerDecisions = [
-    {
-      task: tasks.find((task) => task.id === "t-102"),
-      tag: "结果验收",
-      detail: "AI 已交付竞品分析，等待确认后进入项目评审",
-      waiting: "已等待 2 小时",
-      action: "立即验收",
-    },
-    {
-      task: tasks.find((task) => task.id === "t-106"),
-      tag: "方向决策",
-      detail: "产品与开发对移动端一级导航范围存在分歧",
-      waiting: "阻塞 1 天",
-      action: "确认方案",
-    },
-    {
-      task: tasks.find((task) => task.id === "t-103"),
-      tag: "里程碑调整",
-      detail: "客户资料未到，需要决定是否调整交付顺序",
-      waiting: "等待外部",
-      action: "调整计划",
-    },
-  ];
-  const managerExceptions = [
-    { task: tasks.find((task) => task.id === "t-106"), issue: "已阻塞 1 天", tone: "red", suggestion: "确认范围" },
-    { task: tasks.find((task) => task.id === "t-103"), issue: "外部资料未到", tone: "amber", suggestion: "并行推进" },
-    { task: tasks.find((task) => task.id === "t-104"), issue: "今天到期 · 剩余 42%", tone: "blue", suggestion: "提醒负责人" },
-  ];
+  const managerDecisions = tasks
+    .filter((task) => (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && task.owner === currentUser)
+      || (task.apiStatus === "WAITING_REVIEW" && task.reviewer === currentUser)
+      || (task.apiStatus === "PENDING_OWNER_CONFIRMATION" && task.owner === currentUser))
+    .map((task) => task.apiStatus === "WAITING_REVIEW"
+      ? { task, tag:"结果验收", detail:"负责人已提交结果，等待验收决定", waiting:"待你处理", action:"立即验收" }
+      : task.apiStatus === "WAITING_HUMAN_CONFIRMATION"
+        ? { task, tag:"AI 草稿确认", detail:"AI 已生成草稿，确认后才能提交验收", waiting:"待你确认", action:"查看草稿" }
+        : { task, tag:"任务接收", detail:"新任务等待负责人确认接收", waiting:"待你确认", action:"确认任务" });
+  const managerExceptions = tasks
+    .filter((task) => ["blocked", "external"].includes(task.status))
+    .map((task) => task.status === "blocked"
+      ? { task, issue:"任务已阻塞", tone:"red", suggestion:"协调资源" }
+      : { task, issue:"等待外部", tone:"amber", suggestion:"查看依赖" });
   const receiverMetrics = [
     { label: "未完成", value: personalTasks.length, note: "我的全部进行中任务", icon: ListChecks, tone: "blue", action: () => navigate("/tasks") },
     { label: "今天", value: todayTasks.length, note: "今天必须完成", icon: Clock3, tone: "violet", action: () => { setTodayOpen(true); setAssignedOpen(false); setExtractionOpen(null); } },
@@ -951,7 +937,7 @@ function Dashboard() {
     { label: "待接收", value: pendingAssignments.length, note: "确认后进入任务池", icon: Inbox, tone: "cyan", action: () => { setAssignedSource(null); setAssignedOpen(true); setExtractionOpen(null); } },
   ];
   const dispatcherMetrics = [
-    { label: "待我决策", value: managerDecisions.length, note: "不处理将影响团队推进", icon: Target, tone: "blue", action: () => managerDecisions[0].task && openTask(managerDecisions[0].task) },
+    { label: "待我决策", value: managerDecisions.length, note: "不处理将影响团队推进", icon: Target, tone: "blue", action: () => navigate("/tasks?focus=decisions") },
     { label: "逾期 / 临期", value: 2, note: "今天需要跟进", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
     { label: "阻塞 / 求助", value: tasks.filter((task) => ["blocked", "external"].includes(task.status)).length, note: "需要协调资源或方向", icon: AlertCircle, tone: "red", action: () => navigate("/help") },
     { label: "待分配", value: pendingDistributionCount, note: "来自会议与聊天", icon: Inbox, tone: "violet", action: () => openExtraction("meeting") },
@@ -1622,6 +1608,10 @@ function ProjectChat({ project }: { project: Project }) {
 
 function TaskPool() {
   const { tasks, candidates, setTasks, notify, openTask, openCandidate } = useHub();
+  const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const decisionOnly = new URLSearchParams(location.search).get("focus") === "decisions";
   const [tab, setTab] = useState("我的任务");
   const [claimed, setClaimed] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState("全部状态");
@@ -1631,7 +1621,11 @@ function TaskPool() {
   const filteredTasks = tasks.filter((task) => {
     const matchesQuery = task.title.includes(query) || task.project.includes(query);
     const matchesOwner = !ownedOnly || task.owner === "廖婉琛";
-    return matchesQuery && matchesOwner;
+    const matchesDecision = !decisionOnly
+      || (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && task.owner === user.name)
+      || (task.apiStatus === "WAITING_REVIEW" && task.reviewer === user.name)
+      || (task.apiStatus === "PENDING_OWNER_CONFIRMATION" && task.owner === user.name);
+    return matchesQuery && matchesOwner && matchesDecision;
   });
   const activeTasks = filteredTasks.filter((task) => task.status !== "done" && (statusFilter === "全部状态" || statusMeta[task.status].label === statusFilter));
   const completedTasks = filteredTasks.filter((task) => task.status === "done");
@@ -1651,6 +1645,7 @@ function TaskPool() {
         <section className="panel table-panel">
           <div className="table-toolbar">
             <label className="table-search"><Search size={16}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索任务或项目" /></label>
+            {decisionOnly && <button className="task-focus-filter" onClick={() => navigate("/tasks", {replace:true})}><Target size={14}/> 待我决策 <X size={13}/></button>}
             {tab === "我的任务" && <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option>全部状态</option><option>进行中</option><option>AI 执行中</option><option>待我确认</option><option>待验收</option><option>已阻塞</option><option>等待外部</option></select>}
             <button className={"button secondary compact " + (ownedOnly ? "active" : "")} onClick={() => setOwnedOnly((value) => !value)}><Users size={15}/> {ownedOnly ? "已筛选：我负责的" : "我负责的"}</button>
           </div>

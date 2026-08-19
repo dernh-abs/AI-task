@@ -3754,6 +3754,21 @@ a:focus-visible {
   border-bottom: 1px solid var(--hub-line);
 }
 
+.task-focus-filter {
+  display: inline-flex;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid #b9cdf8;
+  border-radius: 8px;
+  background: #edf4ff;
+  color: #245fcf;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .table-search {
   display: flex;
   width: min(340px, 45vw);
