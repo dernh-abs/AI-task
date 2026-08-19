@@ -3126,7 +3126,7 @@ a:focus-visible {
 
   .project-space-page.is-ai-chat .chat-messages {
     padding: 10px 14px;
-    overflow-y: hidden;
+    overflow-y: auto;
   }
 
   .project-space-page.is-ai-chat .project-scope-note {
@@ -3210,6 +3210,7 @@ a:focus-visible {
 
 .project-chat-main {
   display: flex;
+  min-height: 0;
   flex-direction: column;
   padding: 0;
 }
@@ -3217,6 +3218,7 @@ a:focus-visible {
 .project-chat-main > header {
   display: flex;
   height: 64px;
+  flex: 0 0 64px;
   align-items: center;
   gap: 9px;
   padding: 0 17px;
@@ -3257,9 +3259,12 @@ a:focus-visible {
 }
 
 .chat-messages {
+  min-height: 0;
   overflow-y: auto;
   flex: 1;
   padding: 18px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .project-scope-note {
@@ -3449,6 +3454,7 @@ a:focus-visible {
 .chat-composer {
   display: grid;
   min-height: 54px;
+  flex: 0 0 auto;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 8px;
