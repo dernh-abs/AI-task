@@ -12,6 +12,8 @@ export type ApiTaskActionResponse = components["schemas"]["TaskActionResponse"];
 export type ApiSubmission = components["schemas"]["SubmissionRead"];
 export type ApiExternalContact = components["schemas"]["ExternalContactRead"];
 export type ApiExternalDependency = components["schemas"]["ExternalDependencyRead"];
+export type ApiCandidate = components["schemas"]["CandidateRead"];
+export type ApiCandidateExtractionResponse = components["schemas"]["CandidateExtractionResponse"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
 export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:(token:string)=>window.localStorage.setItem(TOKEN_KEY,token), clear:()=>window.localStorage.removeItem(TOKEN_KEY) };
@@ -31,3 +33,7 @@ export const performTaskAction=(taskId:string,action:"ACCEPT"|"START"|"SUBMIT"|"
 export const fetchTaskSubmissions=(taskId:string)=>request<ApiSubmission[]>(`/tasks/${taskId}/submissions`);
 export const fetchExternalContacts=()=>request<ApiExternalContact[]>("/external-contacts");
 export const fetchExternalDependency=(taskId:string)=>request<ApiExternalDependency|null>(`/tasks/${taskId}/external-dependency`);
+export const createCandidateExtraction=(payload:components["schemas"]["CandidateExtractionRequest"])=>request<ApiCandidateExtractionResponse>("/candidate-extractions",{method:"POST",body:JSON.stringify(payload)});
+export const updateCandidate=(candidateId:string,payload:components["schemas"]["CandidateUpdateRequest"])=>request<ApiCandidate>(`/candidates/${candidateId}`,{method:"PATCH",body:JSON.stringify(payload)});
+export const confirmCandidate=(candidateId:string,expectedVersion:number,idempotencyKey=crypto.randomUUID())=>request<components["schemas"]["CandidateConfirmResponse"]>(`/candidates/${candidateId}/confirm`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({expected_version:expectedVersion})});
+export const ignoreCandidate=(candidateId:string,idempotencyKey=crypto.randomUUID())=>request<ApiCandidate>(`/candidates/${candidateId}/ignore`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey}});

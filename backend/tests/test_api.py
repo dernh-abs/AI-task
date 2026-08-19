@@ -138,3 +138,29 @@ def test_waiting_external_reminder_and_resume_flow() -> None:
         assert restored["external_feedback_status"] == "RECEIVED"
         assert restored["actual_received_at"] is not None
         assert client.get("/api/projects", headers=headers).json()[0]["health"] == "正常"
+
+
+def test_candidate_extraction_edit_confirm_and_idempotency() -> None:
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        extraction_payload = {"project_id": "p-quanyi", "source_type": "MEETING", "title": "阶段四评审", "content": "整理候选任务接口\n补充人工确认流程"}
+        extraction = client.post("/api/candidate-extractions", headers=ceo_headers, json=extraction_payload)
+        assert extraction.status_code == 200
+        assert extraction.json()["execution_mode"] == "MOCK"
+        assert extraction.json()["degraded"] is False
+        candidate = extraction.json()["candidates"][0]
+        edited = client.patch(f"/api/candidates/{candidate['id']}", headers=ceo_headers, json={"expected_version": 1, "owner_id": "u-member", "reviewer_id": "u-ceo", "deliverable": "候选任务 API 与测试"})
+        assert edited.status_code == 200
+        assert edited.json()["version"] == 2
+        confirm_headers = {**ceo_headers, "Idempotency-Key": "confirm-candidate-1"}
+        confirmed = client.post(f"/api/candidates/{candidate['id']}/confirm", headers=confirm_headers, json={"expected_version": 2})
+        assert confirmed.status_code == 200
+        assert confirmed.json()["task"]["status"] == "PENDING_OWNER_CONFIRMATION"
+        replay = client.post(f"/api/candidates/{candidate['id']}/confirm", headers=confirm_headers, json={"expected_version": 2})
+        assert replay.status_code == 200
+        assert replay.json()["idempotent_replay"] is True
+        duplicate = client.post(f"/api/candidates/{candidate['id']}/confirm", headers={**ceo_headers, "Idempotency-Key": "confirm-candidate-2"}, json={"expected_version": 2})
+        assert duplicate.status_code == 409
+        cached = client.post("/api/candidate-extractions", headers=ceo_headers, json=extraction_payload)
+        assert cached.json()["cached"] is True

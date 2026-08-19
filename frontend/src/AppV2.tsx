@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, performTaskAction, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, updateCandidate, type ApiCandidate, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -2775,6 +2775,23 @@ function TaskDetailPage() {
 }
 
 function TaskExtractionReview({ initialSource, onClose }: { initialSource: ExtractionSource; onClose: () => void }) {
+  const { projects, setTasks, notify } = useHub();
+  const [projectId, setProjectId] = useState(projects[0]?.id || "");
+  const [title, setTitle] = useState(initialSource === "meeting" ? "会议行动项" : "聊天行动项");
+  const [content, setContent] = useState("");
+  const [candidates, setCandidates] = useState<ApiCandidate[]>([]);
+  const [mode, setMode] = useState<"LIVE"|"MOCK"|"FALLBACK"|null>(null);
+  const [fallbackReason, setFallbackReason] = useState<string|null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const extract = async () => {setBusy(true);setError("");try{const result=await createCandidateExtraction({project_id:projectId,source_type:initialSource==="meeting"?"MEETING":"CHAT",title,content});setCandidates(result.candidates);setMode(result.execution_mode);setFallbackReason(result.fallback_reason);notify(`已生成 ${result.candidates.length} 个候选，须人工确认后才会创建任务`);}catch(reason){setError(reason instanceof ApiError?reason.message:"候选提取失败");}finally{setBusy(false);}};
+  const save = async (candidate: ApiCandidate) => {setBusy(true);try{const updated=await updateCandidate(candidate.id,{expected_version:candidate.version,title:candidate.title,deliverable:candidate.deliverable,description:candidate.description,owner_id:candidate.owner_id,reviewer_id:candidate.reviewer_id,due_at:candidate.due_at});setCandidates((items)=>items.map((item)=>item.id===updated.id?updated:item));notify("候选修改已保存");}catch(reason){notify(reason instanceof ApiError?reason.message:"保存失败");}finally{setBusy(false);}};
+  const confirm = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await confirmCandidate(candidate.id,candidate.version);setCandidates((items)=>items.map((item)=>item.id===candidate.id?result.candidate:item));setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);notify("候选已确认并创建正式任务");}catch(reason){notify(reason instanceof ApiError?reason.message:"确认失败");}finally{setBusy(false);}};
+  const ignore = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await ignoreCandidate(candidate.id);setCandidates((items)=>items.map((item)=>item.id===result.id?result:item));notify("候选已忽略");}catch(reason){notify(reason instanceof ApiError?reason.message:"忽略失败");}finally{setBusy(false);}};
+  return <AppModal title="AI 候选任务提取" subtitle="原文保存为不可变快照；AI 只生成候选，正式任务必须人工确认。" onClose={onClose} size="xl"><div className="candidate-live-workflow"><section className="form-stack"><label><span>所属项目</span><select value={projectId} onChange={(event)=>setProjectId(event.target.value)}>{projects.map((project)=><option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label><span>来源标题</span><input value={title} onChange={(event)=>setTitle(event.target.value)}/></label><label><span>粘贴{initialSource==="meeting"?"会议纪要":"聊天原文"}</span><textarea value={content} onChange={(event)=>setContent(event.target.value)} placeholder="每行一个明确行动项时，Mock 模式也可稳定提取。"/></label>{error&&<p className="login-error">{error}</p>}<button className="button primary" disabled={busy||content.trim().length<4||!projectId} onClick={extract}><Sparkles size={16}/>{busy?"处理中…":"保存快照并提取候选"}</button></section>{mode&&<div className={"ai-mode-banner "+mode.toLowerCase()}><Bot size={17}/><span><strong>{mode==="LIVE"?"真实 AI":mode==="FALLBACK"?"降级结果":"本地 Mock"}</strong><small>{mode==="FALLBACK"?`Live 调用失败，原因：${fallbackReason||"未知"}`:mode==="MOCK"?"确定性本地结果，不计入正式 Live 验收":"结果由 Qwen 实时生成并记录调用日志"}</small></span></div>}<div className="candidate-review-list">{candidates.map((candidate)=><article key={candidate.id} className={candidate.status!=="ACTIVE"?"resolved":""}><header><span>置信度 {candidate.confidence}%</span><em>{candidate.status}</em></header><input value={candidate.title} disabled={candidate.status!=="ACTIVE"} onChange={(event)=>setCandidates((items)=>items.map((item)=>item.id===candidate.id?{...item,title:event.target.value}:item))}/><textarea value={candidate.deliverable} disabled={candidate.status!=="ACTIVE"} onChange={(event)=>setCandidates((items)=>items.map((item)=>item.id===candidate.id?{...item,deliverable:event.target.value}:item))}/><small>证据：{candidate.evidence}</small>{candidate.status==="ACTIVE"&&<footer><button className="button secondary compact" disabled={busy} onClick={()=>ignore(candidate)}>忽略</button><button className="button secondary compact" disabled={busy} onClick={()=>save(candidate)}>保存修改</button><button className="button primary compact" disabled={busy||!candidate.owner_id||!candidate.reviewer_id} onClick={()=>confirm(candidate)}>确认创建任务</button></footer>}</article>)}</div></div><footer className="modal-actions"><button className="button secondary" onClick={onClose}>关闭</button></footer></AppModal>;
+}
+
+function LegacyTaskExtractionReview({ initialSource, onClose }: { initialSource: ExtractionSource; onClose: () => void }) {
   const { setTasks, notify, addNotification, projects, openPreview } = useHub();
   const [source, setSource] = useState<ExtractionSource>(initialSource);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => Object.values(extractionBatches).flatMap((batch) => batch.tasks.filter((task) => task.status !== "已确认").map((task) => task.id)));

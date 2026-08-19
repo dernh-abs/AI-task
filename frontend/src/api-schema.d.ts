@@ -208,10 +208,192 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/candidate-extractions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Candidate Extraction */
+        post: operations["create_candidate_extraction_api_candidate_extractions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Candidates */
+        get: operations["list_candidates_api_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Candidate */
+        patch: operations["update_candidate_api_candidates__candidate_id__patch"];
+        trace?: never;
+    };
+    "/api/candidates/{candidate_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Candidate Route */
+        post: operations["confirm_candidate_route_api_candidates__candidate_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/candidates/{candidate_id}/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ignore Candidate */
+        post: operations["ignore_candidate_api_candidates__candidate_id__ignore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** CandidateConfirmRequest */
+        CandidateConfirmRequest: {
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** CandidateConfirmResponse */
+        CandidateConfirmResponse: {
+            candidate: components["schemas"]["CandidateRead"];
+            task: components["schemas"]["TaskRead"];
+            /**
+             * Idempotent Replay
+             * @default false
+             */
+            idempotent_replay: boolean;
+        };
+        /** CandidateExtractionRequest */
+        CandidateExtractionRequest: {
+            /** Project Id */
+            project_id: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "MEETING" | "CHAT" | "DOCUMENT" | "AI_CHAT";
+            /** Title */
+            title: string;
+            /** Content */
+            content: string;
+        };
+        /** CandidateExtractionResponse */
+        CandidateExtractionResponse: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Candidates */
+            candidates: components["schemas"]["CandidateRead"][];
+            /**
+             * Execution Mode
+             * @enum {string}
+             */
+            execution_mode: "LIVE" | "MOCK" | "FALLBACK";
+            /** Degraded */
+            degraded: boolean;
+            /** Fallback Reason */
+            fallback_reason: string | null;
+            /** Cached */
+            cached: boolean;
+            /** Call Id */
+            call_id: string;
+        };
+        /** CandidateRead */
+        CandidateRead: {
+            /** Id */
+            id: string;
+            /** Source Snapshot Id */
+            source_snapshot_id: string;
+            /** Project Id */
+            project_id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Deliverable */
+            deliverable: string;
+            /** Owner Id */
+            owner_id: string | null;
+            /** Reviewer Id */
+            reviewer_id: string | null;
+            /** Due At */
+            due_at: string | null;
+            /** Confidence */
+            confidence: number;
+            /** Evidence */
+            evidence: string;
+            /** Status */
+            status: string;
+            /** Created Task Id */
+            created_task_id: string | null;
+            /** Version */
+            version: number;
+        };
+        /** CandidateUpdateRequest */
+        CandidateUpdateRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Title */
+            title?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Deliverable */
+            deliverable?: string | null;
+            /** Owner Id */
+            owner_id?: string | null;
+            /** Reviewer Id */
+            reviewer_id?: string | null;
+            /** Due At */
+            due_at?: string | null;
+        };
         /**
          * ExecutionMode
          * @enum {string}
@@ -842,6 +1024,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExternalReminderRead"][];
+                };
+            };
+        };
+    };
+    create_candidate_extraction_api_candidate_extractions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateExtractionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateExtractionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_candidates_api_candidates_get: {
+        parameters: {
+            query?: {
+                project_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_candidate_api_candidates__candidate_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_candidate_route_api_candidates__candidate_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateConfirmResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ignore_candidate_api_candidates__candidate_id__ignore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

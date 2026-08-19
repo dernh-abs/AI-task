@@ -1,20 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .config import load_settings
+from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
-from .models import ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, Project, Task, TaskStatusHistory, TaskSubmission, TeamMember, User
+from .model_gateway import GatewayOutputError, extract_candidates
+from .models import CandidateStatus, CandidateTask, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, SourceSnapshot, Task, TaskStatusHistory, TaskSubmission, TeamMember, User, utc_now
 from .permissions import can_read_project, readable_project_ids
-from .schemas import ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectRead, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskRead, TokenResponse, UserRead
+from .schemas import CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectRead, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -163,3 +167,87 @@ def task_external_dependency(task_id: str, user: User = Depends(get_current_user
 def external_reminders(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[ExternalReminderRead]:
     rows = session.exec(select(ExternalReminderEvent).where(ExternalReminderEvent.recipient_user_id == user.id).order_by(ExternalReminderEvent.created_at.desc())).all()
     return [ExternalReminderRead(**row.model_dump()) for row in rows]
+
+
+@app.post("/api/candidate-extractions", response_model=CandidateExtractionResponse)
+def create_candidate_extraction(payload: CandidateExtractionRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateExtractionResponse:
+    project = session.get(Project, payload.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project access denied")
+    try:
+        gateway = extract_candidates(session, project.id, payload.content)
+    except GatewayOutputError as exc:
+        raise HTTPException(status_code=422, detail={"code": "AI_SCHEMA_INVALID", "message": "AI output did not match the candidate schema; no candidates were created"}) from exc
+    snapshot = SourceSnapshot(id=f"src-{uuid4().hex}", project_id=project.id, source_type=payload.source_type, title=payload.title, content=payload.content, content_hash=hashlib.sha256(payload.content.encode()).hexdigest(), created_by=user.id, extraction_version="candidate-extract-v1")
+    session.add(snapshot)
+    candidates: list[CandidateTask] = []
+    for extracted in gateway.data.candidates:
+        candidate = CandidateTask(id=f"cand-{uuid4().hex}", source_snapshot_id=snapshot.id, project_id=project.id, title=extracted.title, description=extracted.description, deliverable=extracted.deliverable, owner_id=extracted.owner_id or user.id, reviewer_id=extracted.reviewer_id or project.owner_id, due_at=extracted.due_at, confidence=extracted.confidence, evidence=extracted.evidence)
+        session.add(candidate)
+        candidates.append(candidate)
+    session.commit()
+    for candidate in candidates:
+        session.refresh(candidate)
+    return CandidateExtractionResponse(snapshot_id=snapshot.id, candidates=[candidate_read(item) for item in candidates], execution_mode=gateway.execution_mode, degraded=gateway.degraded, fallback_reason=gateway.fallback_reason, cached=gateway.cached, call_id=gateway.call_id)
+
+
+@app.get("/api/candidates", response_model=list[CandidateRead])
+def list_candidates(project_id: str | None = None, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[CandidateRead]:
+    allowed = readable_project_ids(session, user)
+    if project_id and project_id not in allowed:
+        raise HTTPException(status_code=403, detail="Project access denied")
+    ids = [project_id] if project_id else allowed
+    rows = session.exec(select(CandidateTask).where(CandidateTask.project_id.in_(ids)).order_by(CandidateTask.created_at.desc())).all() if ids else []
+    return [candidate_read(item) for item in rows]
+
+
+@app.patch("/api/candidates/{candidate_id}", response_model=CandidateRead)
+def update_candidate(candidate_id: str, payload: CandidateUpdateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateRead:
+    candidate = session.get(CandidateTask, candidate_id)
+    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if CandidateStatus(candidate.status) != CandidateStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail={"code": "CANDIDATE_ALREADY_RESOLVED", "message": "Candidate can no longer be edited"})
+    if candidate.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail={"code": "VERSION_CONFLICT", "message": "Candidate was updated by another request"})
+    for key, value in payload.model_dump(exclude={"expected_version"}, exclude_unset=True).items():
+        setattr(candidate, key, value)
+    candidate.version += 1
+    session.add(candidate)
+    session.commit()
+    session.refresh(candidate)
+    return candidate_read(candidate)
+
+
+@app.post("/api/candidates/{candidate_id}/confirm", response_model=CandidateConfirmResponse)
+def confirm_candidate_route(candidate_id: str, payload: CandidateConfirmRequest, idempotency_key: str = Header(alias="Idempotency-Key", min_length=8), user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateConfirmResponse:
+    candidate = session.get(CandidateTask, candidate_id)
+    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    try:
+        task, replay = confirm_candidate(session, candidate, user, payload.expected_version, idempotency_key)
+    except DomainError as exc:
+        session.rollback()
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
+    return CandidateConfirmResponse(candidate=candidate_read(candidate), task=_task_read(session, task), idempotent_replay=replay)
+
+
+@app.post("/api/candidates/{candidate_id}/ignore", response_model=CandidateRead)
+def ignore_candidate(candidate_id: str, idempotency_key: str = Header(alias="Idempotency-Key", min_length=8), user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateRead:
+    candidate = session.get(CandidateTask, candidate_id)
+    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    existing = session.get(IdempotencyRecord, idempotency_key)
+    if existing:
+        return candidate_read(candidate)
+    if CandidateStatus(candidate.status) != CandidateStatus.ACTIVE:
+        raise HTTPException(status_code=409, detail="Candidate already resolved")
+    candidate.status = CandidateStatus.IGNORED
+    candidate.version += 1
+    session.add(candidate)
+    session.add(IdempotencyRecord(key=idempotency_key, actor_id=user.id, resource_id=candidate.id, action="IGNORE_CANDIDATE"))
+    session.commit()
+    session.refresh(candidate)
+    return candidate_read(candidate)

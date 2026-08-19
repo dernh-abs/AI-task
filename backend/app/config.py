@@ -17,6 +17,10 @@ class Settings:
     jwt_expire_minutes: int
     cors_origins: tuple[str, ...]
     seed_demo_data: bool
+    ai_mode: str
+    qwen_api_key: str | None
+    qwen_model: str
+    ai_daily_budget_usd: float
 
 
 def load_settings() -> Settings:
@@ -27,5 +31,8 @@ def load_settings() -> Settings:
         jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "480")),
         cors_origins=tuple(item.strip() for item in origins.split(",") if item.strip()),
         seed_demo_data=_as_bool(os.getenv("SEED_DEMO_DATA"), True),
+        ai_mode=os.getenv("AI_MODE", "mock").lower(),
+        qwen_api_key=os.getenv("QWEN_API_KEY"),
+        qwen_model=os.getenv("QWEN_MODEL", "qwen-turbo"),
+        ai_daily_budget_usd=float(os.getenv("AI_DAILY_BUDGET_USD", "1.0")),
     )
-

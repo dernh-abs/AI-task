@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import ExecutionMode, StageStatus, TaskStatus, TeamRole
 
@@ -147,3 +147,57 @@ class ExternalContactRead(BaseModel):
     name: str
     organization: str
     channel: str
+
+
+class CandidateExtractionRequest(BaseModel):
+    project_id: str
+    source_type: Literal["MEETING", "CHAT", "DOCUMENT", "AI_CHAT"]
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=4, max_length=100_000)
+
+
+class CandidateRead(BaseModel):
+    id: str
+    source_snapshot_id: str
+    project_id: str
+    title: str
+    description: str
+    deliverable: str
+    owner_id: str | None
+    reviewer_id: str | None
+    due_at: datetime | None
+    confidence: int
+    evidence: str
+    status: str
+    created_task_id: str | None
+    version: int
+
+
+class CandidateExtractionResponse(BaseModel):
+    snapshot_id: str
+    candidates: list[CandidateRead]
+    execution_mode: Literal["LIVE", "MOCK", "FALLBACK"]
+    degraded: bool
+    fallback_reason: str | None
+    cached: bool
+    call_id: str
+
+
+class CandidateUpdateRequest(BaseModel):
+    expected_version: int
+    title: str | None = None
+    description: str | None = None
+    deliverable: str | None = None
+    owner_id: str | None = None
+    reviewer_id: str | None = None
+    due_at: datetime | None = None
+
+
+class CandidateConfirmRequest(BaseModel):
+    expected_version: int
+
+
+class CandidateConfirmResponse(BaseModel):
+    candidate: CandidateRead
+    task: TaskRead
+    idempotent_replay: bool = False

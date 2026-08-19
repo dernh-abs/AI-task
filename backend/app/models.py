@@ -52,6 +52,20 @@ class ExternalFeedbackStatus(StrEnum):
     RECEIVED = "RECEIVED"
 
 
+class AiExecutionMode(StrEnum):
+    LIVE = "LIVE"
+    MOCK = "MOCK"
+    FALLBACK = "FALLBACK"
+
+
+class CandidateStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    STASHED = "STASHED"
+    IGNORED = "IGNORED"
+    CREATED = "CREATED"
+    LINKED = "LINKED"
+
+
 class User(SQLModel, table=True):
     id: str = Field(primary_key=True)
     email: str = Field(sa_column=Column(String(255), unique=True, index=True, nullable=False))
@@ -200,4 +214,60 @@ class ExternalReminderEvent(SQLModel, table=True):
     recipient_user_id: str = Field(foreign_key="user.id", index=True)
     reminder_type: str
     reminder_date: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class SourceSnapshot(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    source_type: str
+    title: str
+    content: str = Field(sa_column=Column(Text, nullable=False))
+    content_hash: str = Field(index=True)
+    created_by: str = Field(foreign_key="user.id")
+    extraction_version: str
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class CandidateTask(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    source_snapshot_id: str = Field(foreign_key="sourcesnapshot.id", index=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    title: str
+    description: str = Field(default="", sa_column=Column(Text, nullable=False))
+    deliverable: str
+    owner_id: str | None = Field(default=None, foreign_key="user.id")
+    reviewer_id: str | None = Field(default=None, foreign_key="user.id")
+    due_at: datetime | None = None
+    confidence: int
+    evidence: str = Field(default="", sa_column=Column(Text, nullable=False))
+    status: CandidateStatus = Field(default=CandidateStatus.ACTIVE, sa_column=Column(String(20), nullable=False, index=True))
+    confirmed_by: str | None = Field(default=None, foreign_key="user.id")
+    confirmed_at: datetime | None = None
+    created_task_id: str | None = Field(default=None, foreign_key="task.id", unique=True)
+    version: int = 1
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AiCallLog(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    capability: str
+    prompt_version: str
+    model: str
+    execution_mode: AiExecutionMode = Field(sa_column=Column(String(16), nullable=False))
+    degraded: bool = False
+    fallback_reason: str | None = None
+    input_hash: str = Field(index=True)
+    latency_ms: int
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0
+    success: bool
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class AiResponseCache(SQLModel, table=True):
+    cache_key: str = Field(primary_key=True)
+    response_json: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=utc_now)
