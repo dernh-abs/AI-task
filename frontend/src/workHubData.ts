@@ -57,6 +57,7 @@ export type Project = {
   nextMilestone: string;
   due: string;
   color: string;
+  stages?: Array<{ id: string; name: string; position: number; status: "PLANNED" | "ACTIVE" | "WAITING_REVIEW" | "DONE"; progress: number; health: "正常" | "有风险" | "需关注" }>;
 };
 
 export type HelpRequest = {

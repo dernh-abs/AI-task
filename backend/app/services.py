@@ -68,12 +68,16 @@ def project_reads(session: Session, project_ids: list[str]) -> list[ProjectRead]
         for stage in project_stages:
             stage_tasks = tasks_by_stage[stage.id]
             progress = round(sum(task.progress for task in stage_tasks) / len(stage_tasks)) if stage_tasks else 0
-            stage_reads.append(StageRead(id=stage.id, name=stage.name, position=stage.position, status=StageStatus(stage.status), progress=progress))
+            stage_external_levels = [reminder_level(dependency_by_task[task.id].expected_at, datetime.now(timezone.utc)) for task in stage_tasks if task.id in dependency_by_task]
+            has_overdue_task = any(task.due_at and task.due_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc) and TaskStatus(task.status) not in {TaskStatus.DONE, TaskStatus.CANCELED} for task in stage_tasks)
+            stage_health = "需关注" if "OVERDUE" in stage_external_levels or has_overdue_task else "有风险" if any(task.status == TaskStatus.BLOCKED for task in stage_tasks) or "UPCOMING" in stage_external_levels else "正常"
+            stage_reads.append(StageRead(id=stage.id, name=stage.name, position=stage.position, status=StageStatus(stage.status), progress=progress, health=stage_health))
         project_tasks = [task for task in tasks if task.project_id == project.id]
-        progress = round(sum(task.progress for task in project_tasks) / len(project_tasks)) if project_tasks else 0
+        total_weight = sum(stage.weight for stage in project_stages)
+        progress = round(sum(stage_read.progress * stage.weight for stage_read, stage in zip(stage_reads, project_stages)) / total_weight) if total_weight else round(sum(task.progress for task in project_tasks) / len(project_tasks)) if project_tasks else 0
         has_blocker = any(task.status == TaskStatus.BLOCKED for task in project_tasks)
         external_levels = [reminder_level(dependency_by_task[task.id].expected_at, datetime.now(timezone.utc)) for task in project_tasks if task.id in dependency_by_task]
-        health = "需关注" if "OVERDUE" in external_levels else "有风险" if has_blocker or "UPCOMING" in external_levels else "正常"
+        health = "需关注" if "OVERDUE" in external_levels or any(item.health == "需关注" for item in stage_reads) else "有风险" if has_blocker or "UPCOMING" in external_levels or any(item.health == "有风险" for item in stage_reads) else "正常"
         current_stage = next((stage.name for stage in project_stages if stage.status == StageStatus.ACTIVE), project_stages[0].name if project_stages else "未设置")
         results.append(ProjectRead(id=project.id, name=project.name, client=project.client, objective=project.objective, owner_id=project.owner_id, owner_name=names.get(project.owner_id, "未指定"), next_milestone=project.next_milestone, due_at=project.due_at, progress=progress, health=health, current_stage=current_stage, stages=stage_reads))
     return results

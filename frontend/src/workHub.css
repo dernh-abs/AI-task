@@ -2548,6 +2548,10 @@ a:focus-visible {
   grid-template-columns: repeat(5, 1fr);
   margin-top: 26px;
 }
+.stage-panel-actions { display: flex; align-items: center; gap: 10px; }
+.stage-step > strong { display: flex; flex-direction: column; gap: 2px; }
+.stage-step > strong small { color: var(--hub-subtle); font-size: 10px; font-weight: 400; }
+.stage-step > .text-button { margin-left: auto; font-size: 11px; }
 
 .stage-step {
   position: relative;

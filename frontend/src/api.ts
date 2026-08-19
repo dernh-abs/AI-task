@@ -15,6 +15,7 @@ export type ApiExternalDependency = components["schemas"]["ExternalDependencyRea
 export type ApiCandidate = components["schemas"]["CandidateRead"];
 export type ApiCandidateExtractionResponse = components["schemas"]["CandidateExtractionResponse"];
 export type ApiAgentRun = components["schemas"]["AgentRunRead"];
+export type ApiContribution = components["schemas"]["ContributionRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
 export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:(token:string)=>window.localStorage.setItem(TOKEN_KEY,token), clear:()=>window.localStorage.removeItem(TOKEN_KEY) };
@@ -29,7 +30,11 @@ async function request<T>(path:string, options:RequestInit={}):Promise<T> {
 export const login=(email:string,password:string)=>request<TokenResponse>("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
 export const fetchMe=()=>request<ApiUser>("/auth/me");
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
+export const createProject=(payload:components["schemas"]["ProjectCreateRequest"])=>request<ApiProject>("/projects",{method:"POST",body:JSON.stringify(payload)});
+export const createStage=(projectId:string,payload:components["schemas"]["StageCreateRequest"])=>request<ApiProject>(`/projects/${projectId}/stages`,{method:"POST",body:JSON.stringify(payload)});
+export const updateStage=(stageId:string,payload:components["schemas"]["StageUpdateRequest"])=>request<ApiProject>(`/stages/${stageId}`,{method:"PATCH",body:JSON.stringify(payload)});
 export const fetchTasks=()=>request<ApiTask[]>("/tasks");
+export const createTask=(payload:components["schemas"]["TaskCreateRequest"])=>request<ApiTask>("/tasks",{method:"POST",body:JSON.stringify(payload)});
 export const performTaskAction=(taskId:string,action:"ACCEPT"|"START"|"SUBMIT"|"APPROVE"|"RETURN"|"WAIT_EXTERNAL"|"RESUME_EXTERNAL"|"CONFIRM_AI"|"REVISE_AI"|"CANCEL",payload:ApiTaskActionRequest,idempotencyKey=crypto.randomUUID())=>request<ApiTaskActionResponse>(`/tasks/${taskId}/actions/${action}`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify(payload)});
 export const fetchTaskSubmissions=(taskId:string)=>request<ApiSubmission[]>(`/tasks/${taskId}/submissions`);
 export const fetchExternalContacts=()=>request<ApiExternalContact[]>("/external-contacts");
@@ -40,3 +45,4 @@ export const confirmCandidate=(candidateId:string,expectedVersion:number,idempot
 export const ignoreCandidate=(candidateId:string,idempotencyKey=crypto.randomUUID())=>request<ApiCandidate>(`/candidates/${candidateId}/ignore`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey}});
 export const startAgentRun=(taskId:string)=>request<components["schemas"]["AgentRunStartResponse"]>(`/tasks/${taskId}/agent-runs`,{method:"POST"});
 export const fetchAgentRuns=(taskId:string)=>request<ApiAgentRun[]>(`/tasks/${taskId}/agent-runs`);
+export const fetchContributions=()=>request<ApiContribution[]>("/contributions");

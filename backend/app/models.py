@@ -308,3 +308,15 @@ class AgentRunLog(SQLModel, table=True):
     level: str
     message: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class ContributionEvent(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("task_id", "event_type", "submission_version", name="uq_contribution_task_event_version"),)
+
+    id: str = Field(primary_key=True)
+    task_id: str = Field(foreign_key="task.id", index=True)
+    user_id: str = Field(foreign_key="user.id", index=True)
+    event_type: str
+    submission_version: int
+    points: int
+    created_at: datetime = Field(default_factory=utc_now)

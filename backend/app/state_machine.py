@@ -7,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from .models import AgentRun, AgentRunStatus, AuditEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunStatus, AuditEvent, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
 from .schemas import TaskAction, TaskActionRequest
 
 
@@ -114,6 +114,11 @@ def apply_task_action(session: Session, task: Task, action: TaskAction, actor: U
         latest = session.exec(select(TaskSubmission).where(TaskSubmission.task_id == task.id).order_by(TaskSubmission.version.desc())).first()
         submission_version = 1 if latest is None else latest.version + 1
         session.add(TaskSubmission(id=f"sub-{uuid4().hex}", task_id=task.id, version=submission_version, submitted_by=actor.id, summary=run.output_text, external_url=None, asset_reference=f"agent-run:{run.id}"))
+    if action == "APPROVE":
+        latest_submission = session.exec(select(TaskSubmission).where(TaskSubmission.task_id == task.id).order_by(TaskSubmission.version.desc())).first()
+        if not latest_submission:
+            raise DomainError(422, "SUBMISSION_REQUIRED", "A task submission is required before approval")
+        session.add(ContributionEvent(id=f"contrib-{uuid4().hex}", task_id=task.id, user_id=task.owner_id, event_type="TASK_APPROVED", submission_version=latest_submission.version, points=10))
     task.status = to_status
     task.progress = 100 if to_status == TaskStatus.DONE else 95 if to_status == TaskStatus.WAITING_REVIEW else max(5, min(task.progress, 85))
     task.version += 1

@@ -65,7 +65,8 @@ export interface paths {
         /** List Projects */
         get: operations["list_projects_api_projects_get"];
         put?: never;
-        post?: never;
+        /** Create Project */
+        post: operations["create_project_api_projects_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -86,7 +87,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update Project */
+        patch: operations["update_project_api_projects__project_id__patch"];
         trace?: never;
     };
     "/api/tasks": {
@@ -99,11 +101,46 @@ export interface paths {
         /** List Tasks */
         get: operations["list_tasks_api_tasks_get"];
         put?: never;
-        post?: never;
+        /** Create Task */
+        post: operations["create_task_api_tasks_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/stages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Stage */
+        post: operations["create_stage_api_projects__project_id__stages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stages/{stage_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Stage */
+        patch: operations["update_stage_api_stages__stage_id__patch"];
         trace?: never;
     };
     "/api/tasks/{task_id}/actions/{action}": {
@@ -311,6 +348,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contributions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Contributions */
+        get: operations["contributions_api_contributions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -452,6 +506,28 @@ export interface components {
             /** Due At */
             due_at?: string | null;
         };
+        /** ContributionRead */
+        ContributionRead: {
+            /** Id */
+            id: string;
+            /** Task Id */
+            task_id: string;
+            /** User Id */
+            user_id: string;
+            /** User Name */
+            user_name: string;
+            /** Event Type */
+            event_type: string;
+            /** Submission Version */
+            submission_version: number;
+            /** Points */
+            points: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /**
          * ExecutionMode
          * @enum {string}
@@ -531,6 +607,28 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** ProjectCreateRequest */
+        ProjectCreateRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Client
+             * @default 内部
+             */
+            client: string;
+            /**
+             * Objective
+             * @default
+             */
+            objective: string;
+            /**
+             * Next Milestone
+             * @default
+             */
+            next_milestone: string;
+            /** Due At */
+            due_at?: string | null;
+        };
         /** ProjectRead */
         ProjectRead: {
             /** Id */
@@ -561,6 +659,31 @@ export interface components {
             /** Stages */
             stages: components["schemas"]["StageRead"][];
         };
+        /** ProjectUpdateRequest */
+        ProjectUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Client */
+            client?: string | null;
+            /** Objective */
+            objective?: string | null;
+            /** Next Milestone */
+            next_milestone?: string | null;
+            /** Due At */
+            due_at?: string | null;
+        };
+        /** StageCreateRequest */
+        StageCreateRequest: {
+            /** Name */
+            name: string;
+            /** Owner Id */
+            owner_id: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+        };
         /** StageRead */
         StageRead: {
             /** Id */
@@ -572,12 +695,28 @@ export interface components {
             status: components["schemas"]["StageStatus"];
             /** Progress */
             progress: number;
+            /**
+             * Health
+             * @default 正常
+             * @enum {string}
+             */
+            health: "正常" | "有风险" | "需关注";
         };
         /**
          * StageStatus
          * @enum {string}
          */
         StageStatus: "PLANNED" | "ACTIVE" | "WAITING_REVIEW" | "DONE";
+        /** StageUpdateRequest */
+        StageUpdateRequest: {
+            /** Name */
+            name?: string | null;
+            /** Owner Id */
+            owner_id?: string | null;
+            /** Weight */
+            weight?: number | null;
+            status?: components["schemas"]["StageStatus"] | null;
+        };
         /** StatusHistoryRead */
         StatusHistoryRead: {
             /** Id */
@@ -665,6 +804,37 @@ export interface components {
              * @default false
              */
             idempotent_replay: boolean;
+        };
+        /** TaskCreateRequest */
+        TaskCreateRequest: {
+            /** Project Id */
+            project_id: string;
+            /** Stage Id */
+            stage_id?: string | null;
+            /** Title */
+            title: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Deliverable */
+            deliverable: string;
+            /** Acceptance */
+            acceptance: string;
+            /** Owner Id */
+            owner_id: string;
+            /** Reviewer Id */
+            reviewer_id: string;
+            /** @default HUMAN */
+            execution_mode: components["schemas"]["ExecutionMode"];
+            /**
+             * Priority
+             * @default MEDIUM
+             */
+            priority: string;
+            /** Due At */
+            due_at?: string | null;
         };
         /** TaskRead */
         TaskRead: {
@@ -855,6 +1025,39 @@ export interface operations {
             };
         };
     };
+    create_project_api_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_project_api_projects__project_id__get: {
         parameters: {
             query?: never;
@@ -865,6 +1068,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_project_api_projects__project_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -904,6 +1142,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_task_api_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_stage_api_projects__project_id__stages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_stage_api_stages__stage_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stage_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
                 };
             };
             /** @description Validation Error */
@@ -1306,6 +1647,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRunStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    contributions_api_contributions_get: {
+        parameters: {
+            query?: {
+                user_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContributionRead"][];
                 };
             };
             /** @description Validation Error */

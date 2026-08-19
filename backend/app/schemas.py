@@ -33,6 +33,7 @@ class StageRead(BaseModel):
     position: int
     status: StageStatus
     progress: int
+    health: Literal["正常", "有风险", "需关注"] = "正常"
 
 
 class ProjectRead(BaseModel):
@@ -224,3 +225,57 @@ class AgentRunRead(BaseModel):
 class AgentRunStartResponse(BaseModel):
     run: AgentRunRead
     idempotent_replay: bool
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    client: str = "内部"
+    objective: str = ""
+    next_milestone: str = ""
+    due_at: datetime | None = None
+
+
+class ProjectUpdateRequest(BaseModel):
+    name: str | None = None
+    client: str | None = None
+    objective: str | None = None
+    next_milestone: str | None = None
+    due_at: datetime | None = None
+
+
+class StageCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    owner_id: str
+    weight: float = Field(default=1.0, gt=0, le=100)
+
+
+class StageUpdateRequest(BaseModel):
+    name: str | None = None
+    owner_id: str | None = None
+    weight: float | None = Field(default=None, gt=0, le=100)
+    status: StageStatus | None = None
+
+
+class TaskCreateRequest(BaseModel):
+    project_id: str
+    stage_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    deliverable: str = Field(min_length=1)
+    acceptance: str = Field(min_length=1)
+    owner_id: str
+    reviewer_id: str
+    execution_mode: ExecutionMode = ExecutionMode.HUMAN
+    priority: str = "MEDIUM"
+    due_at: datetime | None = None
+
+
+class ContributionRead(BaseModel):
+    id: str
+    task_id: str
+    user_id: str
+    user_name: str
+    event_type: str
+    submission_version: int
+    points: int
+    created_at: datetime

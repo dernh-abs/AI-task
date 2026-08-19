@@ -98,6 +98,8 @@ def test_manual_task_submission_review_and_idempotency() -> None:
         assert len(submissions.json()) == 1
         history = client.get("/api/tasks/t-mvp-2/history", headers=member_headers)
         assert [item["action"] for item in history.json()] == ["APPROVE", "SUBMIT", "START"]
+        contributions = client.get("/api/contributions", headers=member_headers).json()
+        assert len([item for item in contributions if item["task_id"] == "t-mvp-2"]) == 1
 
 
 def test_version_conflict_is_rejected() -> None:
@@ -186,3 +188,30 @@ def test_agent_run_human_confirmation_and_review() -> None:
         assert confirmed.json()["task"]["status"] == "WAITING_REVIEW"
         submissions = client.get("/api/tasks/t-mvp-1/submissions", headers=member_headers).json()
         assert submissions[0]["asset_reference"] == f"agent-run:{run['id']}"
+
+
+def test_project_stage_task_crud_and_weighted_aggregation() -> None:
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        project = client.post("/api/projects", headers=headers, json={"name": "聚合验收项目", "client": "内部", "objective": "验证真实聚合"})
+        assert project.status_code == 200
+        project_id = project.json()["id"]
+        staged = client.post(f"/api/projects/{project_id}/stages", headers=headers, json={"name": "交付阶段", "owner_id": "u-ceo", "weight": 2})
+        stage_id = staged.json()["stages"][0]["id"]
+        assert client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "ACTIVE"}).status_code == 200
+        created = client.post("/api/tasks", headers=headers, json={"project_id": project_id, "stage_id": stage_id, "title": "完成聚合验收", "description": "执行完整人工任务", "deliverable": "验收报告", "acceptance": "状态和进度均真实", "owner_id": "u-ceo", "reviewer_id": "u-ceo", "execution_mode": "HUMAN"})
+        assert created.status_code == 200
+        task_id = created.json()["id"]
+        assert client.post(f"/api/tasks/{task_id}/actions/START", headers={**headers, "Idempotency-Key": "aggregate-start"}, json={"expected_version": 1}).status_code == 200
+        assert client.post(f"/api/tasks/{task_id}/actions/SUBMIT", headers={**headers, "Idempotency-Key": "aggregate-submit"}, json={"expected_version": 2, "summary": "聚合验收已完成"}).status_code == 200
+        approved = client.post(f"/api/tasks/{task_id}/actions/APPROVE", headers={**headers, "Idempotency-Key": "aggregate-approve"}, json={"expected_version": 3})
+        assert approved.status_code == 200
+        aggregated = client.get(f"/api/projects/{project_id}", headers=headers).json()
+        assert aggregated["progress"] == 100
+        assert aggregated["stages"][0]["progress"] == 100
+        assert aggregated["health"] == "正常"
+        assert client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "WAITING_REVIEW"}).status_code == 200
+        assert client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "DONE"}).status_code == 200
+        contribution_rows = client.get("/api/contributions", headers=headers).json()
+        assert len([item for item in contribution_rows if item["task_id"] == task_id]) == 1

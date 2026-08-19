@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, fetchAgentRuns, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, type ApiAgentRun, type ApiCandidate, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -104,7 +104,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 };
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
-const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3] });
+const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
 const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
@@ -1252,46 +1252,54 @@ function ProjectsPage() {
 }
 
 function CreateProject({ onClose, onCreate }: { onClose: () => void; onCreate: (project: Project) => void }) {
-  const [form, setForm] = useState({ name: "", client: "", owner: "廖婉琛", due: "8月30日", milestone: "完成项目启动与范围确认" });
-  const submit = (event: FormEvent) => {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ name: "", client: "", owner: user.name, due: "", milestone: "完成项目启动与范围确认" });
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || !form.client.trim()) return;
-    onCreate({
-      id: "p-" + Date.now(),
-      name: form.name.trim(),
-      client: form.client.trim(),
-      stage: "项目启动",
-      health: "正常",
-      progress: 8,
-      owner: form.owner,
-      nextMilestone: form.milestone,
-      due: form.due,
-      color: "#246bfd",
-    });
+    setBusy(true);setError("");
+    try {const created=await createProject({name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,next_milestone:form.milestone,due_at:null});onCreate(projectFromApi(created,0));}
+    catch(reason){setError(reason instanceof ApiError?reason.message:"项目创建失败");}
+    finally{setBusy(false);}
   };
   return <AppModal title="新建项目" subtitle="创建后进入独立项目空间，再逐步补充任务、资产、会议与 AI 上下文。" onClose={onClose} size="lg">
     <form className="form-stack" onSubmit={submit}>
       <label><span>项目名称 *</span><input autoFocus value={form.name} onChange={(event) => setForm({...form,name:event.target.value})} placeholder="例如：客户官网升级"/></label>
-      <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人</span><select value={form.owner} onChange={(event) => setForm({...form,owner:event.target.value})}>{teamMembers.map((name) => <option key={name}>{name}</option>)}</select></label></div>
+      <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人</span><input value={form.owner} disabled /></label></div>
       <div className="form-grid"><label><span>目标日期</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>第一个里程碑</span><input value={form.milestone} onChange={(event) => setForm({...form,milestone:event.target.value})}/></label></div>
       <div className="ai-form-tip"><Sparkles size={17}/><span>创建后 AI 会根据项目目标建议第一批任务，但不会直接分发。</span></div>
-      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim()}>创建并进入项目</button></footer>
+      {error&&<p className="login-error">{error}</p>}
+      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim() || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
     </form>
   </AppModal>;
 }
 
+function CreateStageModal({ project, onClose, onSaved }: { project: Project; onClose: () => void; onSaved: (project: Project) => void }) {
+  const { user } = useAuth();
+  const [name, setName] = useState("");
+  const [weight, setWeight] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {event.preventDefault();if(!name.trim())return;setBusy(true);setError("");try{const result=await createStage(project.id,{name:name.trim(),owner_id:user.id,weight});onSaved(projectFromApi(result,0));}catch(reason){setError(reason instanceof ApiError?reason.message:"阶段创建失败");}finally{setBusy(false);}};
+  return <AppModal title="新增项目阶段" subtitle="阶段使用独立状态，进度和风险由所属任务在服务端聚合。" onClose={onClose}><form className="form-stack" onSubmit={submit}><label><span>阶段名称</span><input autoFocus value={name} onChange={(event)=>setName(event.target.value)} placeholder="例如：方案设计"/></label><label><span>聚合权重</span><input type="number" min="0.1" max="100" step="0.1" value={weight} onChange={(event)=>setWeight(Number(event.target.value))}/></label>{error&&<p className="login-error">{error}</p>}<footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!name.trim()||busy}>{busy?"创建中…":"创建阶段"}</button></footer></form></AppModal>;
+}
+
 function ProjectSpace() {
   const { projectId = "" } = useParams();
-  const { projects, tasks, assets, openTask, openAsset, openPreview } = useHub();
+  const { projects, setProjects, tasks, assets, openTask, openAsset, openPreview, notify } = useHub();
   const navigate = useNavigate();
   const location = useLocation();
   const project = projects.find((item) => item.id === projectId);
   const [tab, setTab] = useState(() => new URLSearchParams(location.search).get("tab") === "ai" ? "AI 协作" : "总览");
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
+  const [createStageOpen, setCreateStageOpen] = useState(false);
   if (!project) return <Navigate to="/projects" replace />;
   const projectTasks = tasks.filter((task) => task.projectId === project.id);
   const projectAssets = assets.filter((asset) => asset.scope.includes(project.client) || project.id === "p-quanyi");
   const tabs = ["总览", "任务", "AI 协作", "资产", "会议"];
+  const advanceStage = async (stage: NonNullable<Project["stages"]>[number]) => {const next=stage.status==="PLANNED"?"ACTIVE":stage.status==="ACTIVE"?"WAITING_REVIEW":stage.status==="WAITING_REVIEW"?"DONE":null;if(!next)return;try{const result=await updateStage(stage.id,{status:next});setProjects((items)=>items.map((item)=>item.id===project.id?projectFromApi(result,0):item));notify("阶段状态已更新");}catch(reason){notify(reason instanceof ApiError?reason.message:"阶段更新失败");}};
   return (
     <div className={`project-space-page${tab === "AI 协作" ? " is-ai-chat" : ""}`}>
       <button className="back-button" onClick={() => navigate("/projects")}><ArrowLeft size={16} /> 返回项目</button>
@@ -1318,12 +1326,13 @@ function ProjectSpace() {
         <div className="project-overview-grid">
           <div className="project-overview-main">
             <section className="panel stage-panel">
-              <div className="panel-title-row"><div><h2>项目阶段</h2><p>当前位于「{project.stage}」</p></div><strong>{project.progress}%</strong></div>
+              <div className="panel-title-row"><div><h2>项目阶段</h2><p>当前位于「{project.stage}」</p></div><div className="stage-panel-actions"><strong>{project.progress}%</strong><button className="button secondary compact" onClick={()=>setCreateStageOpen(true)}><Plus size={14}/> 新增阶段</button></div></div>
               <div className="stage-steps">
-                {["需求澄清", "信息架构", "方案深化", "制作交付", "验收归档"].map((stage, index) => (
-                  <div className={"stage-step " + (index < 2 ? "complete" : index === 2 ? "current" : "")} key={stage}>
-                    <span>{index < 2 ? <Check size={14} /> : index + 1}</span>
-                    <strong>{stage}</strong>
+                {(project.stages?.length ? project.stages : [{id:"demo-stage",name:project.stage,position:1,status:"ACTIVE" as const,progress:project.progress,health:project.health}]).map((stage, index) => (
+                  <div className={"stage-step " + (stage.status === "DONE" ? "complete" : stage.status === "ACTIVE" || stage.status === "WAITING_REVIEW" ? "current" : "")} key={stage.id}>
+                    <span>{stage.status === "DONE" ? <Check size={14} /> : index + 1}</span>
+                    <strong>{stage.name}<small>{stage.progress}% · {stage.health}</small></strong>
+                    {stage.id!=="demo-stage"&&stage.status!=="DONE"&&<button className="text-button" onClick={()=>advanceStage(stage)}>{stage.status==="PLANNED"?"启动":stage.status==="ACTIVE"?"提交阶段验收":"验收通过"}</button>}
                   </div>
                 ))}
               </div>
@@ -1373,6 +1382,7 @@ function ProjectSpace() {
         </section>
       )}
       {createTaskOpen && <CreateTask onClose={() => setCreateTaskOpen(false)} defaultProjectId={project.id} />}
+      {createStageOpen && <CreateStageModal project={project} onClose={()=>setCreateStageOpen(false)} onSaved={(saved)=>{setProjects((items)=>items.map((item)=>item.id===saved.id?saved:item));setCreateStageOpen(false);notify("阶段已创建");}}/>}
     </div>
   );
 }
@@ -2114,25 +2124,28 @@ function CreateSkill({ onClose, onCreate }: { onClose: () => void; onCreate: (sk
 }
 
 function ContributionPage() {
-  const { contributions, openPreview } = useHub();
+  const { openPreview } = useHub();
   const [period, setPeriod] = useState<"本月" | "本季度">("本月");
+  const [contributions, setContributions] = useState<ApiContribution[]>([]);
+  useEffect(()=>{fetchContributions().then(setContributions).catch(()=>setContributions([]));},[]);
+  const totalPoints = contributions.reduce((sum,item)=>sum+item.points,0);
   return (
     <>
       <PageHeader title="我的贡献" description="让主动认领、解决问题和知识沉淀被看见，不与绩效直接绑定。" />
       <section className="contribution-hero">
-        <div><span className="contribution-medal"><Trophy size={28}/></span><p><small>本月贡献</small><strong>86</strong><em>分</em><span>超过团队 72% 的成员</span></p></div>
+        <div><span className="contribution-medal"><Trophy size={28}/></span><p><small>真实贡献事件</small><strong>{totalPoints}</strong><em>分</em><span>{contributions.length} 次已验收任务入账</span></p></div>
         <div className="contribution-sparkline"><svg viewBox="0 0 300 80"><path d="M0 68 C45 66 58 45 96 50 S150 24 184 36 S242 8 300 14"/><path className="fill" d="M0 68 C45 66 58 45 96 50 S150 24 184 36 S242 8 300 14 L300 80 L0 80Z"/></svg></div>
       </section>
       <div className="contribution-grid">
         {[
-          { label: "完成任务", value: "12", Icon: CheckCircle2, tone: "blue" },
+          { label: "完成任务", value: String(contributions.length), Icon: CheckCircle2, tone: "blue" },
           { label: "解决求助", value: "6", Icon: HandHelping, tone: "green" },
           { label: "知识沉淀", value: "4", Icon: FileText, tone: "violet" },
           { label: "开放任务", value: "3", Icon: Target, tone: "orange" },
         ].map(({ label, value, Icon, tone }) => <button key={label} onClick={() => openPreview({eyebrow:"贡献明细",title:label + " · " + period,description:"共记录 " + value + " 次真实发生的团队推进行为。",items:label === "完成任务" ? [{title:"品牌视觉规范初稿",detail:"今天 11:20 · +8"},{title:"移动端状态覆盖检查",detail:"8月17日 · +6"},{title:"官网信息架构评审",detail:"8月15日 · +5"}] : label === "解决求助" ? [{title:"GEO 问题库结构",detail:"昨天 16:42 · +5"},{title:"客户资料缺口推进",detail:"8月16日 · +4"}] : label === "知识沉淀" ? [{title:"等待外部任务处理 SOP",detail:"8月16日 · +3"},{title:"任务协作方式说明",detail:"8月14日 · +3"}] : [{title:"空态文案整理",detail:"开放任务 · 待认领"},{title:"移动端文字溢出检查",detail:"开放任务 · 待认领"}],note:"贡献只用于呈现协作与知识影响，不直接绑定绩效。",primaryLabel:label === "开放任务" ? "进入任务池" : "查看贡献记录",primaryRoute:label === "开放任务" ? "/tasks" : undefined})}><span className={"metric-icon " + tone}><Icon size={18}/></span><strong>{value}</strong><small>{label}</small><ChevronRight size={15}/></button>)}
       </div>
       <div className="contribution-layout">
-        <section className="panel"><div className="panel-title-row"><div><h2>贡献记录</h2><p>记录实际发生的团队推进行为。</p></div><button className="button secondary compact" onClick={() => setPeriod((value) => value === "本月" ? "本季度" : "本月")}>{period} <ChevronDown size={14}/></button></div><div className="timeline-list">{contributions.map((item,index) => <div key={index}><span className="timeline-dot"/><p><strong>{item}</strong><small>{index === 0 ? "今天 11:20" : index === 1 ? "昨天 16:42" : "8月16日"}</small></p></div>)}</div></section>
+        <section className="panel"><div className="panel-title-row"><div><h2>贡献记录</h2><p>仅展示服务端在验收通过时写入的幂等事件。</p></div><button className="button secondary compact" onClick={() => setPeriod((value) => value === "本月" ? "本季度" : "本月")}>{period} <ChevronDown size={14}/></button></div><div className="timeline-list">{contributions.map((item) => <div key={item.id}><span className="timeline-dot"/><p><strong>任务验收通过 · +{item.points} 分</strong><small>{new Date(item.created_at).toLocaleString("zh-CN")} · 提交版本 V{item.submission_version}</small></p></div>)}{!contributions.length&&<p className="empty-inline">暂无真实贡献事件；任务验收通过后自动入账。</p>}</div></section>
         <aside className="panel achievement-panel"><div className="panel-title-row"><h2>成就徽章</h2><span>4 / 8</span></div>{[
           { name: "推进者", desc: "连续推动关键任务", Icon: Zap },
           { name: "答疑伙伴", desc: "帮助同事解决问题", Icon: HandHelping },
@@ -2564,24 +2577,31 @@ function GlobalSearch({ onClose }: { onClose: () => void }) {
 
 function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaultProjectId?: string }) {
   const { projects, setTasks, notify } = useHub();
-  const [form, setForm] = useState({ title: "", projectId: defaultProjectId || projects[0].id, owner: "廖婉琛", reviewer: "徐泉", due: "8月22日", mode: "hybrid" as ExecutionMode, deliverable: "" });
-  const submit = (event: FormEvent) => {
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ title: "", projectId: defaultProjectId || projects[0].id, owner: user.name, reviewer: user.role === "CEO" ? user.name : "徐泉", due: "", mode: "hybrid" as ExecutionMode, deliverable: "" });
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.title.trim()) return;
-    const project = projects.find((item) => item.id === form.projectId)!;
-    setTasks((items) => [{ id: "t-" + Date.now(), title: form.title, projectId: project.id, project: project.name, owner: form.owner, collaborators: [], reviewer: form.reviewer, due: form.due, priority: "中", status: "todo", mode: form.mode, progress: 0, description: "从快速新建创建的任务，可在详情中继续补充背景和验收标准。", deliverable: form.deliverable || "待补充", source: "手动创建", nextAction: "补充任务背景并开始执行" }, ...items]);
-    notify("任务已创建并加入任务池");
-    onClose();
+    setBusy(true);
+    try {
+      const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:user.id,reviewer_id:user.role==="CEO"?user.id:"u-ceo",execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:null});
+      setTasks((items) => [taskFromApi(created), ...items]);
+      notify("任务已真实创建并加入任务池");
+      onClose();
+    } catch (reason) {
+      notify(reason instanceof ApiError ? reason.message : "任务创建失败");
+    } finally {setBusy(false);}
   };
   return (
     <AppModal title="新建任务" subtitle="先保留最少必要信息，详情可由 AI 继续补全。" onClose={onClose}>
       <form className="form-stack" onSubmit={submit}>
         <label><span>任务标题 *</span><input autoFocus value={form.title} onChange={(event) => setForm({...form,title:event.target.value})} placeholder="要完成什么？" /></label>
-        <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><select value={form.owner} onChange={(event) => setForm({...form,owner:event.target.value})}>{teamMembers.map((name) => <option key={name}>{name}</option>)}</select></label></div>
-        <div className="form-grid"><label><span>交付给 / 验收人</span><select value={form.reviewer} onChange={(event) => setForm({...form,reviewer:event.target.value})}>{teamMembers.filter((name) => name !== form.owner).map((name) => <option key={name}>{name}</option>)}</select></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
+        <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><input value={form.owner} disabled /></label></div>
+        <div className="form-grid"><label><span>交付给 / 验收人</span><input value={form.reviewer} disabled /></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
         <div className="form-grid"><label><span>截止时间</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI</option><option value="hybrid">人机协作</option></select></label></div>
         <div className="ai-form-tip"><Sparkles size={17}/><span>创建后 AI 会根据项目上下文建议执行步骤、风险与参考资料。</span></div>
-        <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()}>创建任务</button></footer>
+        <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()||busy}>{busy?"创建中…":"创建任务"}</button></footer>
       </form>
     </AppModal>
   );
