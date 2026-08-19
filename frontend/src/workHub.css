@@ -7685,15 +7685,19 @@ a:focus-visible {
   grid-template-columns: minmax(0, 1fr) 318px;
   gap: 14px;
   min-height: 0;
-  overflow: hidden;
+  align-items: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .task-detail-main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   gap: 12px;
   min-width: 0;
   min-height: 0;
+  align-self: start;
 }
 
 .task-overview-card {
@@ -7803,9 +7807,10 @@ a:focus-visible {
 
 .task-detail-lower {
   display: grid;
-  grid-template-columns: minmax(300px, .8fr) minmax(360px, 1.2fr);
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
   gap: 12px;
   min-height: 0;
+  overflow: visible;
 }
 
 .task-detail-section,
@@ -7844,7 +7849,7 @@ a:focus-visible {
   min-height: 0;
 }
 
-.task-detail-aside > section { height: 100%; padding: 16px 17px; overflow: hidden; }
+.task-detail-aside > section { height: auto; padding: 16px 17px; overflow: hidden; }
 .task-side-panel { display: flex; flex-direction: column; }
 .task-side-group + .task-side-group { margin-top: 13px; padding-top: 13px; border-top: 1px solid #edf0f4; }
 .task-detail-aside dl { margin: 0; }
@@ -7882,6 +7887,9 @@ a:focus-visible {
 .task-activity-feed { min-height: 0; flex: 1 1 auto; overflow-y: auto; scrollbar-width: thin; }
 .activity-section .mention-composer { flex: 0 0 auto; }
 .task-detail-section .drawer-section-title h3 { margin: 0; font-size: 14px; font-weight: 600; }
+/* 固定首行两列排布：AI 建议在左、进展与协作在右，提交后出现的全宽区块自动排到下方，避免挤占右列造成布局错乱/重叠 */
+.task-detail-section.ai-suggestion { grid-column: 1; grid-row: 1; }
+.task-detail-section.activity-section { grid-column: 2; grid-row: 1; }
 .submission-history { grid-column: 1 / -1; }
 .agent-draft-result { grid-column: 1 / -1; }
 .agent-draft-result .drawer-section-title h3 { display: flex; align-items: center; gap: 6px; }
@@ -7930,7 +7938,9 @@ a:focus-visible {
   .task-detail-page { height: auto; overflow: visible; }
   .task-detail-content { grid-template-columns: 1fr; overflow: visible; }
   .task-detail-main { grid-template-rows: auto auto; }
-  .task-detail-lower { grid-template-columns: 1fr; }
+  .task-detail-lower { grid-template-columns: 1fr; overflow: visible; }
+  .task-detail-section.ai-suggestion,
+  .task-detail-section.activity-section { grid-column: auto; grid-row: auto; }
   .task-detail-aside > section { height: auto; overflow: visible; }
 }
 
@@ -8515,13 +8525,15 @@ a:focus-visible {
   }
   .global-search {
     flex: 1;
+    min-width: 0;
     width: auto;
   }
   .global-search kbd,
   .topbar-actions .button span,
-  .topbar-actions > .avatar {
+  .topbar-avatar {
     display: none;
   }
+  .topbar-actions { flex: 0 0 auto; }
   .page-header {
     align-items: flex-start;
     flex-direction: column;
@@ -8665,6 +8677,8 @@ a:focus-visible {
 }
 
 @media (max-width: 480px) {
+  .topbar { gap: 6px; padding-right: 10px; padding-left: 10px; }
+  .topbar-actions { gap: 6px; }
   .main-content {
     padding: 18px 14px 30px;
   }
@@ -8880,8 +8894,8 @@ a:focus-visible {
 
 .notification-badge {
   position: absolute;
-  top: -6px;
-  right: -7px;
+  top: -7px;
+  right: 0;
   display: grid;
   min-width: 19px;
   height: 19px;

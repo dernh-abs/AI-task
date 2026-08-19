@@ -84,6 +84,19 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
+本地 Ollama Live 模式（已安装 Ollama 且已下载 `qwen2.5:7b`）：
+
+```powershell
+cd backend
+$env:AI_MODE="live"
+$env:AI_PROVIDER="ollama"
+$env:OLLAMA_BASE_URL="http://127.0.0.1:11434/v1"
+$env:OLLAMA_MODEL="qwen2.5:7b"
+.venv\Scripts\python -m uvicorn app.main:app --port 8000
+```
+
+若 `ollama` 未加入 PATH，可直接运行 `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`。后端通过 HTTP 接口连接 Ollama，命令行是否在 PATH 中不影响已启动服务的模型调用。
+
 演示账号：
 
 - 任务成员：`member@quanyi.local` / `mvp-member-2026`

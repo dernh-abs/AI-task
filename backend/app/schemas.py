@@ -1,33 +1,44 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import ExecutionMode, StageStatus, TaskStatus, TeamRole
 
 
-class LoginRequest(BaseModel):
+class ApiModel(BaseModel):
+    """Keep API datetimes unambiguous after SQLite drops timezone metadata."""
+
+    @field_validator("*", mode="before", check_fields=False)
+    @classmethod
+    def attach_utc_to_naive_datetimes(cls, value):
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+
+class LoginRequest(ApiModel):
     email: str
     password: str
 
 
-class UserRead(BaseModel):
+class UserRead(ApiModel):
     id: str
     email: str
     name: str
     role: TeamRole
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(ApiModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
 
 
-class StageRead(BaseModel):
+class StageRead(ApiModel):
     id: str
     name: str
     position: int
@@ -36,7 +47,7 @@ class StageRead(BaseModel):
     health: Literal["正常", "有风险", "需关注"] = "正常"
 
 
-class ProjectRead(BaseModel):
+class ProjectRead(ApiModel):
     id: str
     name: str
     client: str
@@ -51,7 +62,7 @@ class ProjectRead(BaseModel):
     stages: list[StageRead]
 
 
-class TaskRead(BaseModel):
+class TaskRead(ApiModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     project_id: str
@@ -77,7 +88,7 @@ class TaskRead(BaseModel):
 TaskAction = Literal["ACCEPT", "START", "SUBMIT", "APPROVE", "RETURN", "WAIT_EXTERNAL", "RESUME_EXTERNAL", "CONFIRM_AI", "REVISE_AI", "CANCEL"]
 
 
-class TaskActionRequest(BaseModel):
+class TaskActionRequest(ApiModel):
     expected_version: int
     summary: str = ""
     external_url: str | None = None
@@ -91,12 +102,12 @@ class TaskActionRequest(BaseModel):
     agent_run_id: str | None = None
 
 
-class TaskActionResponse(BaseModel):
+class TaskActionResponse(ApiModel):
     task: TaskRead
     idempotent_replay: bool = False
 
 
-class SubmissionRead(BaseModel):
+class SubmissionRead(ApiModel):
     id: str
     task_id: str
     version: int
@@ -108,7 +119,7 @@ class SubmissionRead(BaseModel):
     created_at: datetime
 
 
-class StatusHistoryRead(BaseModel):
+class StatusHistoryRead(ApiModel):
     id: str
     task_id: str
     from_status: str
@@ -120,7 +131,7 @@ class StatusHistoryRead(BaseModel):
     created_at: datetime
 
 
-class ExternalDependencyRead(BaseModel):
+class ExternalDependencyRead(ApiModel):
     id: str
     task_id: str
     contact_id: str
@@ -137,28 +148,28 @@ class ExternalDependencyRead(BaseModel):
     reminder_level: Literal["NORMAL", "UPCOMING", "OVERDUE", "RECEIVED"]
 
 
-class ExternalReminderRead(BaseModel):
+class ExternalReminderRead(ApiModel):
     id: str
     task_id: str
     reminder_type: str
     created_at: datetime
 
 
-class ExternalContactRead(BaseModel):
+class ExternalContactRead(ApiModel):
     id: str
     name: str
     organization: str
     channel: str
 
 
-class CandidateExtractionRequest(BaseModel):
+class CandidateExtractionRequest(ApiModel):
     project_id: str
     source_type: Literal["MEETING", "CHAT", "DOCUMENT", "AI_CHAT"]
     title: str = Field(min_length=1, max_length=200)
     content: str = Field(min_length=4, max_length=100_000)
 
 
-class CandidateRead(BaseModel):
+class CandidateRead(ApiModel):
     id: str
     source_snapshot_id: str
     project_id: str
@@ -175,7 +186,7 @@ class CandidateRead(BaseModel):
     version: int
 
 
-class CandidateExtractionResponse(BaseModel):
+class CandidateExtractionResponse(ApiModel):
     snapshot_id: str
     candidates: list[CandidateRead]
     execution_mode: Literal["LIVE", "MOCK", "FALLBACK"]
@@ -185,7 +196,7 @@ class CandidateExtractionResponse(BaseModel):
     call_id: str
 
 
-class CandidateUpdateRequest(BaseModel):
+class CandidateUpdateRequest(ApiModel):
     expected_version: int
     title: str | None = None
     description: str | None = None
@@ -195,17 +206,17 @@ class CandidateUpdateRequest(BaseModel):
     due_at: datetime | None = None
 
 
-class CandidateConfirmRequest(BaseModel):
+class CandidateConfirmRequest(ApiModel):
     expected_version: int
 
 
-class CandidateConfirmResponse(BaseModel):
+class CandidateConfirmResponse(ApiModel):
     candidate: CandidateRead
     task: TaskRead
     idempotent_replay: bool = False
 
 
-class AgentRunRead(BaseModel):
+class AgentRunRead(ApiModel):
     id: str
     task_id: str
     status: str
@@ -222,12 +233,12 @@ class AgentRunRead(BaseModel):
     created_at: datetime
 
 
-class AgentRunStartResponse(BaseModel):
+class AgentRunStartResponse(ApiModel):
     run: AgentRunRead
     idempotent_replay: bool
 
 
-class ProjectCreateRequest(BaseModel):
+class ProjectCreateRequest(ApiModel):
     name: str = Field(min_length=1, max_length=200)
     client: str = "内部"
     objective: str = ""
@@ -235,7 +246,7 @@ class ProjectCreateRequest(BaseModel):
     due_at: datetime | None = None
 
 
-class ProjectUpdateRequest(BaseModel):
+class ProjectUpdateRequest(ApiModel):
     name: str | None = None
     client: str | None = None
     objective: str | None = None
@@ -243,20 +254,20 @@ class ProjectUpdateRequest(BaseModel):
     due_at: datetime | None = None
 
 
-class StageCreateRequest(BaseModel):
+class StageCreateRequest(ApiModel):
     name: str = Field(min_length=1, max_length=120)
     owner_id: str
     weight: float = Field(default=1.0, gt=0, le=100)
 
 
-class StageUpdateRequest(BaseModel):
+class StageUpdateRequest(ApiModel):
     name: str | None = None
     owner_id: str | None = None
     weight: float | None = Field(default=None, gt=0, le=100)
     status: StageStatus | None = None
 
 
-class TaskCreateRequest(BaseModel):
+class TaskCreateRequest(ApiModel):
     project_id: str
     stage_id: str | None = None
     title: str = Field(min_length=1, max_length=200)
@@ -270,7 +281,7 @@ class TaskCreateRequest(BaseModel):
     due_at: datetime | None = None
 
 
-class ContributionRead(BaseModel):
+class ContributionRead(ApiModel):
     id: str
     task_id: str
     user_id: str

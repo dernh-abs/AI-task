@@ -11,5 +11,6 @@ backend/*.db
 !.env.example
 *.pyc
 *.log
+.workbuddy/
 .DS_Store
 Thumbs.db

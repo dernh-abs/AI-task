@@ -31,6 +31,12 @@ def test_health() -> None:
         response = client.get("/api/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+        preflight = client.options(
+            "/api/auth/login",
+            headers={"Origin": "http://127.0.0.1:5173", "Access-Control-Request-Method": "POST"},
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
 
 
 def test_login_and_read_projects() -> None:
@@ -102,10 +108,13 @@ def test_manual_task_submission_review_and_idempotency() -> None:
         submissions = client.get("/api/tasks/t-mvp-2/submissions", headers=member_headers)
         assert submissions.status_code == 200
         assert len(submissions.json()) == 2
+        assert submissions.json()[0]["created_at"].endswith(("Z", "+00:00"))
         history = client.get("/api/tasks/t-mvp-2/history", headers=member_headers)
         assert [item["action"] for item in history.json()] == ["APPROVE", "SUBMIT", "RETURN", "SUBMIT", "START"]
+        assert history.json()[0]["created_at"].endswith(("Z", "+00:00"))
         contributions = client.get("/api/contributions", headers=member_headers).json()
         assert len([item for item in contributions if item["task_id"] == "t-mvp-2"]) == 1
+        assert contributions[0]["created_at"].endswith(("Z", "+00:00"))
 
 
 def test_version_conflict_is_rejected() -> None:

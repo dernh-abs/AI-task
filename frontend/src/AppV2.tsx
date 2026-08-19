@@ -809,13 +809,12 @@ function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile
 
 function Topbar({ openMobile }: { openMobile: () => void }) {
   const { notifications } = useHub();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const unreadCount = notifications.filter((item) => !item.read).length;
-  const previewName = new URLSearchParams(location.search).get("role") === "ceo" ? "徐泉" : "廖婉琛";
   return (
     <>
       <header className="topbar">
@@ -839,7 +838,7 @@ function Topbar({ openMobile }: { openMobile: () => void }) {
             </button>
             {noticeOpen && <NotificationPopover close={() => setNoticeOpen(false)} />}
           </div>
-          <button className="topbar-avatar" onClick={() => navigate("/settings")} aria-label="打开个人设置"><Avatar name={previewName} /></button>
+          <button className="topbar-avatar" onClick={() => navigate("/settings")} aria-label="打开个人设置"><Avatar name={user.name} /></button>
         </div>
       </header>
       {searchOpen && <GlobalSearch onClose={() => setSearchOpen(false)} />}
@@ -2660,6 +2659,7 @@ function TaskDetailPage() {
   const [mentionMenu, setMentionMenu] = useState(false);
   const [reviewReminderSent, setReviewReminderSent] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
   const [submissionOpen, setSubmissionOpen] = useState(false);
   const [externalOpen, setExternalOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -2722,6 +2722,7 @@ function TaskDetailPage() {
   const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
   const startAiAssistance = async () => {
     setActionBusy(true);
+    setAiBusy(true);
     try {
       const result = await startAgentRun(task.id);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
@@ -2730,6 +2731,7 @@ function TaskDetailPage() {
     } catch (reason) {
       notify(reason instanceof ApiError ? reason.message : "AI 运行启动失败");
     } finally {
+      setAiBusy(false);
       setActionBusy(false);
     }
   };
@@ -2759,7 +2761,7 @@ function TaskDetailPage() {
           <div><span><NavLink to="/tasks">任务池</NavLink><ChevronRight size={13}/>{task.project}</span><h1>{task.title}</h1></div>
           <div className="task-detail-header-actions">
             {(task.apiStatus === "TODO" || task.apiStatus === "IN_PROGRESS") && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setExternalOpen(true)}><Clock3 size={16}/> 等待外部</button>}
-            {task.apiStatus === "IN_PROGRESS" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={startAiAssistance}><Sparkles size={16}/> AI 协助生成草稿</button>}
+            {task.apiStatus === "IN_PROGRESS" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={startAiAssistance}>{aiBusy ? <Activity size={16}/> : <Sparkles size={16}/>} {aiBusy ? "Ollama 正在生成…（首次可能约 2 分钟）" : "AI 协助生成草稿"}</button>}
             {task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setAiRevisionOpen(true)}><ArrowLeft size={16}/> 要求 AI 重做</button>}
             {task.apiStatus === "WAITING_REVIEW" && isReviewer && <button className="button secondary" disabled={actionBusy} onClick={() => setReturnOpen(true)}><ArrowLeft size={16}/> 退回修改</button>}
             <button disabled={actionDisabled} className={"button primary " + (actionDisabled ? "disabled" : "")} onClick={action}>{task.status === "ai" ? <Activity size={16}/> : task.status === "review" && isTaskOwner ? <Bell size={16}/> : <ArrowRight size={16}/>} {actionLabel}</button>
