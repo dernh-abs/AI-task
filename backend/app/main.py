@@ -21,7 +21,7 @@ from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates
 from .models import AgentRun, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User
 from .permissions import can_manage_project, can_read_project, is_team_admin, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -114,6 +114,22 @@ def get_project(project_id: str, user: User = Depends(get_current_user), session
     if not can_read_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project access denied")
     return project_reads(session, [project_id])[0]
+
+
+@app.get("/api/projects/{project_id}/members", response_model=list[ProjectMemberRead])
+def list_project_members(project_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[ProjectMemberRead]:
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project access denied")
+    memberships = session.exec(select(ProjectMember).where(ProjectMember.project_id == project_id)).all()
+    rows: list[ProjectMemberRead] = []
+    for membership in memberships:
+        member = session.get(User, membership.user_id)
+        if member and member.is_active:
+            rows.append(ProjectMemberRead(id=member.id, email=member.email, name=member.name, role=ProjectRole(membership.role), is_active=member.is_active))
+    return rows
 
 
 @app.get("/api/tasks", response_model=list[TaskRead])

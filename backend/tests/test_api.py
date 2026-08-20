@@ -271,6 +271,9 @@ def test_invitation_activation_and_real_team_membership() -> None:
         assert teams.json()[0]["name"] == "全意团队"
         assert any(member["email"] == "new.member@quanyi.local" for member in teams.json()[0]["members"])
         assert client.get("/api/projects", headers=member_headers).json()[0]["id"] == "p-quanyi"
+        project_members = client.get("/api/projects/p-quanyi/members", headers=member_headers)
+        assert project_members.status_code == 200
+        assert any(member["email"] == "new.member@quanyi.local" for member in project_members.json())
         assert client.post(f"/api/invitations/{token}/accept", json={"name": "重复成员", "password": "secure-member-2026"}).status_code == 410
 
 

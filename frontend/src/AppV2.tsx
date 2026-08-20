@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeams, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeams, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -273,21 +273,6 @@ function ChatContextChips({ items, onChange }: { items: ChatContextItem[]; onCha
   return <div className="chat-context-chips">{items.map((item) => <span key={item.id}>{item.kind === "expert" ? <Users size={13}/> : item.kind === "skill" ? <WandSparkles size={13}/> : item.kind === "connector" ? <Link2 size={13}/> : <FileText size={13}/>}<span className="context-chip-label">{item.label}</span><button type="button" aria-label={`移除${item.label}`} onClick={() => onChange(items.filter((entry) => entry.id !== item.id))}><X size={12}/></button></span>)}</div>;
 }
 
-const teamMemberProfiles = [
-  { name: "徐泉", role: "CEO" },
-  { name: "廖婉琛", role: "成员" },
-  { name: "曹玉祥", role: "成员" },
-  { name: "TRoY", role: "成员" },
-  { name: "顾一健", role: "成员" },
-  { name: "项仪", role: "成员" },
-  { name: "项白", role: "成员" },
-  { name: "谭莉", role: "成员" },
-  { name: "熊樱", role: "成员" },
-] as const;
-
-const teamMembers = teamMemberProfiles.map((member) => member.name);
-const memberRole = (name: string) => teamMemberProfiles.find((member) => member.name === name)?.role || "成员";
-
 type TeamWorkspace = {
   id: string;
   name: string;
@@ -390,6 +375,12 @@ function useHub() {
   const value = useContext(HubContext);
   if (!value) throw new Error("HubContext is missing");
   return value;
+}
+
+function useActiveTeamMemberProfiles() {
+  const { teams, activeTeamId } = useHub();
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
+  return (activeTeam.memberDetails || []).filter((member) => member.is_active);
 }
 
 const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
@@ -1730,6 +1721,8 @@ function HelpCenter() {
 
 function KnowledgeSpace() {
   const { knowledgePages, setKnowledgePages, assets, setAssets, notify, openPreview, openAsset } = useHub();
+  const { user } = useAuth();
+  const teamMemberProfiles = useActiveTeamMemberProfiles();
   const location = useLocation();
   const requestedPage = new URLSearchParams(location.search).get("page");
   const requestedCreate = new URLSearchParams(location.search).get("create") === "1";
@@ -1802,7 +1795,7 @@ function KnowledgeSpace() {
     updateSelected({content:lines.join("\n")});
     setInsertLine(lineIndex + replacement.length - 1);
   };
-  const mentionItems = mentionType === "同事" ? teamMembers.filter((name) => name !== "廖婉琛").map((name) => ({ id: name, name, meta: memberRole(name) })) : mentionType === "资产" ? assets.map((asset) => ({ id: asset.id, name: asset.title, meta: asset.type + " · " + asset.scope })) : knowledgePages.filter((page) => page.id !== selected.id).map((page) => ({ id: page.id, name: page.title, meta: page.space + " · " + page.parent }));
+  const mentionItems = mentionType === "同事" ? teamMemberProfiles.filter((member) => member.id !== user.id).map((member) => ({ id: member.id, name: member.name, meta: member.role === "CEO" ? "团队管理员" : "成员" })) : mentionType === "资产" ? assets.map((asset) => ({ id: asset.id, name: asset.title, meta: asset.type + " · " + asset.scope })) : knowledgePages.filter((page) => page.id !== selected.id).map((page) => ({ id: page.id, name: page.title, meta: page.space + " · " + page.parent }));
 
   return (
     <div className={`knowledge-workspace${rightOpen ? " activity-open" : ""}`}>
@@ -2499,13 +2492,15 @@ function AiChat() {
 }
 
 function ChatMemberPanel({ members, onInvite, onClose, title = "会话成员", accessLabel = "可访问本会话", inviteLabel = "邀请团队成员", footerText = "被邀请人可以查看全部历史和后续消息，并使用同一上下文独立向 AI 提问。" }: { members: string[]; onInvite: (name: string) => void; onClose: () => void; title?: string; accessLabel?: string; inviteLabel?: string; footerText?: string }) {
-  const invitees = teamMembers.filter((name) => !members.includes(name));
+  const profiles = useActiveTeamMemberProfiles();
+  const invitees = profiles.filter((member) => !members.includes(member.name));
+  const roleFor = (name: string) => profiles.find((member) => member.name === name)?.role === "CEO" ? "团队管理员" : "成员";
   return (
     <div className="chat-member-backdrop" onMouseDown={onClose}>
       <aside className="chat-member-panel" onMouseDown={(event) => event.stopPropagation()}>
         <header><div><span>{title}</span><strong>{members.length} 人可访问</strong></div><button className="icon-button" onClick={onClose} aria-label="关闭成员面板"><X size={18}/></button></header>
-        <section><small>{accessLabel}</small>{members.map((name, index) => <div className="member-row" key={name}><Avatar name={name}/><p><strong>{name}</strong><span>{index === 0 ? "会话所有者 · " + memberRole(name) : memberRole(name) + " · 可查看全部历史并向 AI 提问"}</span></p><em>{index === 0 ? "所有者" : "可访问"}</em></div>)}</section>
-        <section><small>{inviteLabel}</small>{invitees.map((name) => <div className="member-row" key={name}><Avatar name={name}/><p><strong>{name}</strong><span>{memberRole(name)}</span></p><button className="button secondary compact" onClick={() => onInvite(name)}>邀请</button></div>)}</section>
+        <section><small>{accessLabel}</small>{members.map((name, index) => <div className="member-row" key={name}><Avatar name={name}/><p><strong>{name}</strong><span>{index === 0 ? "会话所有者 · " + roleFor(name) : roleFor(name) + " · 可查看全部历史并向 AI 提问"}</span></p><em>{index === 0 ? "所有者" : "可访问"}</em></div>)}</section>
+        <section><small>{inviteLabel}</small>{invitees.map((member) => <div className="member-row" key={member.id}><Avatar name={member.name}/><p><strong>{member.name}</strong><span>{member.role === "CEO" ? "团队管理员" : "成员"}</span></p><button className="button secondary compact" onClick={() => onInvite(member.name)}>邀请</button></div>)}</section>
         <footer><CheckCircle2 size={15}/><span>{footerText}</span></footer>
       </aside>
     </div>
@@ -2563,13 +2558,32 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
   const { projects, setTasks, notify } = useHub();
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState({ title: "", projectId: defaultProjectId || projects[0].id, owner: user.name, reviewer: user.role === "CEO" ? user.name : "徐泉", due: "", mode: "hybrid" as ExecutionMode, deliverable: "" });
+  const [members, setMembers] = useState<ApiProjectMember[]>([]);
+  const [memberError, setMemberError] = useState("");
+  const [form, setForm] = useState({ title: "", projectId: defaultProjectId || projects[0]?.id || "", ownerId: user.id, reviewerId: user.id, due: "", mode: "hybrid" as ExecutionMode, deliverable: "" });
+  useEffect(() => {
+    if (!form.projectId) { setMembers([]); return; }
+    let active = true;
+    setMemberError("");
+    fetchProjectMembers(form.projectId).then((rows) => {
+      if (!active) return;
+      setMembers(rows);
+      const ownerId = rows.some((member) => member.id === user.id) ? user.id : rows[0]?.id || "";
+      const reviewerId = rows.find((member) => member.id !== ownerId)?.id || ownerId;
+      setForm((current) => ({...current, ownerId, reviewerId}));
+    }).catch((reason) => {
+      if (!active) return;
+      setMembers([]);
+      setMemberError(reason instanceof ApiError ? reason.message : "项目成员加载失败");
+    });
+    return () => { active = false; };
+  }, [form.projectId, user.id]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.title.trim()) return;
     setBusy(true);
     try {
-      const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:user.id,reviewer_id:user.role==="CEO"?user.id:"u-ceo",execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:null});
+      const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:form.ownerId,reviewer_id:form.reviewerId,execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:null});
       setTasks((items) => [taskFromApi(created), ...items]);
       notify("任务已真实创建并加入任务池");
       onClose();
@@ -2581,11 +2595,12 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
     <AppModal title="新建任务" subtitle="先保留最少必要信息，详情可由 AI 继续补全。" onClose={onClose}>
       <form className="form-stack" onSubmit={submit}>
         <label><span>任务标题 *</span><input autoFocus value={form.title} onChange={(event) => setForm({...form,title:event.target.value})} placeholder="要完成什么？" /></label>
-        <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><input value={form.owner} disabled /></label></div>
-        <div className="form-grid"><label><span>交付给 / 验收人</span><input value={form.reviewer} disabled /></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
+        <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><select value={form.ownerId} onChange={(event) => setForm({...form,ownerId:event.target.value})}>{members.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+        <div className="form-grid"><label><span>交付给 / 验收人</span><select value={form.reviewerId} onChange={(event) => setForm({...form,reviewerId:event.target.value})}>{members.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}</select></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
+        {memberError && <p className="login-error">{memberError}</p>}
         <div className="form-grid"><label><span>截止时间</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI</option><option value="hybrid">人机协作</option></select></label></div>
         <div className="ai-form-tip"><Sparkles size={17}/><span>创建后 AI 会根据项目上下文建议执行步骤、风险与参考资料。</span></div>
-        <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()||busy}>{busy?"创建中…":"创建任务"}</button></footer>
+        <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()||!form.projectId||!form.ownerId||!form.reviewerId||busy}>{busy?"创建中…":"创建任务"}</button></footer>
       </form>
     </AppModal>
   );
@@ -2593,8 +2608,11 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
 
 function CandidateReview({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {
   const { projects, setTasks, setCandidates, notify } = useHub();
+  const teamMemberProfiles = useActiveTeamMemberProfiles();
+  const teamMembers = teamMemberProfiles.map((member) => member.name);
   const suggestedProject = projects.find((project) => project.name === candidate.suggestedProject) || projects[0];
-  const [form, setForm] = useState({ title: candidate.title, owner: candidate.suggestedOwner, reviewer: candidate.suggestedOwner === "徐泉" ? "廖婉琛" : "徐泉", projectId: suggestedProject.id, due: candidate.due, mode: "hybrid" as ExecutionMode, deliverable: "可审核的工作结果" });
+  const initialOwner = teamMembers.includes(candidate.suggestedOwner) ? candidate.suggestedOwner : teamMembers[0] || "";
+  const [form, setForm] = useState({ title: candidate.title, owner: initialOwner, reviewer: teamMembers.find((name) => name !== initialOwner) || initialOwner, projectId: suggestedProject.id, due: candidate.due, mode: "hybrid" as ExecutionMode, deliverable: "可审核的工作结果" });
   const create = () => {
     const project = projects.find((item) => item.id === form.projectId)!;
     setTasks((items) => [{ id: "t-" + Date.now(), title: form.title, projectId: project.id, project: project.name, owner: form.owner, collaborators: [], reviewer: form.reviewer, due: form.due, priority: "中", status: "todo", mode: form.mode, progress: 0, description: candidate.reason, deliverable: form.deliverable, source: candidate.source + " · " + candidate.sourceDetail, nextAction: "负责人确认后开始执行" }, ...items]);
@@ -2637,6 +2655,9 @@ function WaitExternalModal({ task, userId, busy, onClose, onSubmit }: { task: Ta
 function TaskDetailPage() {
   const { tasks, setTasks, notify, addNotification, startChatWith, openPreview } = useHub();
   const { user } = useAuth();
+  const teamMemberProfiles = useActiveTeamMemberProfiles();
+  const teamMembers = teamMemberProfiles.map((member) => member.name);
+  const memberRole = (name: string) => teamMemberProfiles.find((member) => member.name === name)?.role === "CEO" ? "团队管理员" : "成员";
   const { taskId } = useParams();
   const navigate = useNavigate();
   const task = tasks.find((item) => item.id === taskId);
@@ -2805,7 +2826,7 @@ function TaskDetailPage() {
               <div className="drawer-section-title"><h3>进展与协作</h3><span>{task.collaborators.length} 位协作者</span></div>
               <div className="task-activity-feed">{activities.map((activity, index) => <div className="activity-item" key={activity.author + index}><Avatar name={activity.author} size="sm"/><p><strong>{activity.author}</strong><span><MentionText text={activity.text}/></span><small>{activity.time}</small></p></div>)}</div>
               <form className="mention-composer" onSubmit={submitComment}>
-                {mentionMenu && <div className="mention-menu"><small>选择要通知的同事</small>{teamMembers.filter((name) => name !== "廖婉琛").map((name) => <button type="button" key={name} onClick={() => insertMention(name)}><Avatar name={name} size="sm"/><span>{name}</span><em>{memberRole(name)}</em></button>)}</div>}
+                {mentionMenu && <div className="mention-menu"><small>选择要通知的同事</small>{teamMembers.filter((name) => name !== currentUser).map((name) => <button type="button" key={name} onClick={() => insertMention(name)}><Avatar name={name} size="sm"/><span>{name}</span><em>{memberRole(name)}</em></button>)}</div>}
                 {teamMembers.some((name) => comment.includes("@" + name)) && <div className="composer-mentions">{teamMembers.filter((name) => comment.includes("@" + name)).map((name) => <span className="mention-chip" key={name}>@{name}</span>)}</div>}
                 <input value={comment} onChange={(event) => {const value = event.target.value; setComment(value); setMentionMenu(/@[^@\s]*$/.test(value));}} placeholder="同步进展，或 @同事协作..." />
                 <button type="button" className="mention-trigger" onClick={() => {setComment((value) => value + (value.endsWith(" ") || !value ? "@" : " @")); setMentionMenu(true);}} aria-label="提及同事"><AtSign size={15}/></button>
@@ -2894,10 +2915,12 @@ function LegacyTaskExtractionReview({ initialSource, onClose }: { initialSource:
 
 function MyAssignedTasksReview({ initialSource, onClose }: { initialSource: ExtractionSource | null; onClose: () => void }) {
   const { setTasks, notify, addNotification, projects } = useHub();
+  const { user } = useAuth();
+  const teamMembers = useActiveTeamMemberProfiles().map((member) => member.name);
   const [filter, setFilter] = useState<"all" | ExtractionSource>(initialSource || "all");
   const assignedItems = (["meeting", "chat"] as const).flatMap((source) => {
     const batch = extractionBatches[source];
-    return batch.tasks.filter((task) => task.owner === "廖婉琛" && task.status !== "已确认").map((task) => ({ source, batch, task }));
+    return batch.tasks.filter((task) => task.owner === user.name && task.status !== "已确认").map((task) => ({ source, batch, task }));
   });
   const visibleItems = filter === "all" ? assignedItems : assignedItems.filter((item) => item.source === filter);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => assignedItems.map((item) => item.task.id));
@@ -2912,7 +2935,7 @@ function MyAssignedTasksReview({ initialSource, onClose }: { initialSource: Extr
     const createdTasks: Task[] = selectedVisibleItems.map(({ batch, task }, index) => {
       const project = projects.find((item) => item.id === batch.projectId) || projects[0];
       const draft = drafts[task.id] || task;
-      return { id: "mine-ext-" + createdAt + "-" + index, title: draft.title, projectId: project.id, project: project.name, owner: "廖婉琛", collaborators: [], reviewer: draft.reviewer, due: draft.due, priority: task.confidence >= 93 ? "高" : "中", status: "todo", mode: "human", progress: 0, description: "AI 从" + batch.sourceLabel + "「" + batch.title + "」中识别并分配给我，已由我确认接收。", deliverable: draft.deliverable, source: batch.sourceLabel + " · " + batch.title, nextAction: "开始执行并同步首次进展" };
+      return { id: "mine-ext-" + createdAt + "-" + index, title: draft.title, projectId: project.id, project: project.name, owner: user.name, collaborators: [], reviewer: draft.reviewer, due: draft.due, priority: task.confidence >= 93 ? "高" : "中", status: "todo", mode: "human", progress: 0, description: "AI 从" + batch.sourceLabel + "「" + batch.title + "」中识别并分配给我，已由我确认接收。", deliverable: draft.deliverable, source: batch.sourceLabel + " · " + batch.title, nextAction: "开始执行并同步首次进展" };
     });
     setTasks((tasks) => [...createdTasks, ...tasks]);
     addNotification({ kind: "system", title: "已接收 " + createdTasks.length + " 项 AI 分配", detail: "任务已进入「我的任务」，原始会议或聊天来源仍可追溯", route: "/tasks" });
@@ -2932,7 +2955,7 @@ function MyAssignedTasksReview({ initialSource, onClose }: { initialSource: Extr
         {visibleItems.map(({ source, batch, task }) => {const draft=drafts[task.id] || task; const editing=editingId===task.id; return <article key={task.id} className={(selectedIds.includes(task.id) ? "selected" : "") + (editing ? " editing" : "")}>
           <button className={"extraction-check " + (selectedIds.includes(task.id) ? "checked" : "")} onClick={() => toggle(task.id)} aria-label={selectedIds.includes(task.id) ? "取消选择" : "选择任务"}>{selectedIds.includes(task.id) && <Check size={14}/>}</button>
           <span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span>
-          <div className="assigned-item-copy">{editing ? <div className="assigned-edit-fields"><label><span>任务标题</span><input value={draft.title} onChange={(event) => updateDraft(task.id,{title:event.target.value})}/></label><div><label><span>交付物</span><input value={draft.deliverable} onChange={(event) => updateDraft(task.id,{deliverable:event.target.value})}/></label><label><span>交付给 / 验收人</span><select value={draft.reviewer} onChange={(event) => updateDraft(task.id,{reviewer:event.target.value})}>{teamMembers.filter((name) => name !== "廖婉琛").map((name) => <option key={name}>{name}</option>)}</select></label><label><span>截止时间</span><input value={draft.due} onChange={(event) => updateDraft(task.id,{due:event.target.value})}/></label></div></div> : <><small>{batch.sourceLabel} · {batch.title}</small><strong>{draft.title}</strong><p className="assigned-commitment"><span><FileText size={13}/><em>交付物</em>{draft.deliverable}</span></p></>}</div>
+          <div className="assigned-item-copy">{editing ? <div className="assigned-edit-fields"><label><span>任务标题</span><input value={draft.title} onChange={(event) => updateDraft(task.id,{title:event.target.value})}/></label><div><label><span>交付物</span><input value={draft.deliverable} onChange={(event) => updateDraft(task.id,{deliverable:event.target.value})}/></label><label><span>交付给 / 验收人</span><select value={draft.reviewer} onChange={(event) => updateDraft(task.id,{reviewer:event.target.value})}>{teamMembers.filter((name) => name !== user.name).map((name) => <option key={name}>{name}</option>)}</select></label><label><span>截止时间</span><input value={draft.due} onChange={(event) => updateDraft(task.id,{due:event.target.value})}/></label></div></div> : <><small>{batch.sourceLabel} · {batch.title}</small><strong>{draft.title}</strong><p className="assigned-commitment"><span><FileText size={13}/><em>交付物</em>{draft.deliverable}</span></p></>}</div>
           {!editing && <div className="assigned-item-meta"><span className="assigned-due"><small>截止时间</small><strong>{draft.due}</strong></span><span className="assigned-reviewer"><small>验收人</small><strong><Avatar name={draft.reviewer} size="sm"/>{draft.reviewer}</strong></span></div>}
           <button className="button secondary compact" onClick={() => setEditingId(editing ? null : task.id)}>{editing ? "完成" : "编辑"}</button>
         </article>;})}

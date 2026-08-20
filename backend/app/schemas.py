@@ -105,6 +105,14 @@ class TeamRead(ApiModel):
     project_names: list[str]
 
 
+class ProjectMemberRead(ApiModel):
+    id: str
+    email: str
+    name: str
+    role: ProjectRole
+    is_active: bool
+
+
 class StageRead(ApiModel):
     id: str
     name: str
