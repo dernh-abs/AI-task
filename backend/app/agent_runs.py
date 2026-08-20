@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from .model_gateway import generate_task_draft
-from .models import AgentRun, AgentRunLog, AgentRunStatus, AiExecutionMode, AuditEvent, Task, TaskStatus, TaskStatusHistory, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunLog, AgentRunStatus, AiExecutionMode, AuditEvent, Task, TaskStatus, TaskStatusHistory, User, utc_now
 from .state_machine import DomainError
 
 
@@ -14,7 +14,7 @@ PROMPT_VERSION = "task-draft-v1"
 
 
 def start_agent_run(session: Session, task: Task, actor: User, revision_instruction: str = "") -> tuple[AgentRun, bool]:
-    if task.owner_id != actor.id and actor.role != TeamRole.CEO:
+    if task.owner_id != actor.id:
         raise DomainError(403, "FORBIDDEN", "Only the task owner can start AI assistance")
     latest = session.exec(select(AgentRun).where(AgentRun.task_id == task.id).order_by(AgentRun.created_at.desc())).first()
     if latest and AgentRunStatus(latest.status) in {AgentRunStatus.QUEUED, AgentRunStatus.RUNNING, AgentRunStatus.SUCCEEDED} and TaskStatus(task.status) == TaskStatus.WAITING_HUMAN_CONFIRMATION:

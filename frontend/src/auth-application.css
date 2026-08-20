@@ -1,0 +1,72 @@
+.login-help {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: #52617a;
+  background: #f5f8ff;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.login-help svg {
+  flex: none;
+  margin-top: 1px;
+  color: #246bfd;
+}
+
+.activation-card {
+  width: min(480px, 100%);
+}
+
+.activation-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #1854d8;
+  background: #eaf1ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.invitation-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -7px 0 20px;
+  padding: 13px;
+  border: 1px solid #dce6f8;
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #2456ad;
+}
+
+.invitation-summary > span {
+  display: grid;
+  gap: 3px;
+}
+
+.invitation-summary strong {
+  font-size: 14px;
+}
+
+.invitation-summary small {
+  color: #66738a;
+  line-height: 1.45;
+}
+
+.auth-secondary {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #d8dfeb;
+  border-radius: 10px;
+  color: #344054;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -15,6 +15,7 @@ os.environ["AUTO_CREATE_SCHEMA"] = "true"
 from app.main import app
 from app.database import engine
 from app.external_reminders import reminder_level, scan_external_reminders
+from app.models import Project, Team, User
 from sqlmodel import Session
 
 
@@ -244,3 +245,54 @@ def test_project_stage_task_crud_and_weighted_aggregation() -> None:
         assert client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "DONE"}).status_code == 200
         contribution_rows = client.get("/api/contributions", headers=headers).json()
         assert len([item for item in contribution_rows if item["task_id"] == task_id]) == 1
+
+
+def test_invitation_activation_and_real_team_membership() -> None:
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=ceo_headers,
+            json={"email": "new.member@quanyi.local", "role": "MEMBER", "project_id": "p-quanyi", "project_role": "MEMBER"},
+        )
+        assert created.status_code == 200
+        token = created.json()["activation_token"]
+        inspected = client.get(f"/api/invitations/{token}")
+        assert inspected.status_code == 200
+        assert inspected.json()["team_name"] == "全意团队"
+        assert inspected.json()["project_name"] == "全意 AI 工作中枢"
+
+        activated = client.post(f"/api/invitations/{token}/accept", json={"name": "新成员", "password": "secure-member-2026"})
+        assert activated.status_code == 200
+        member_headers = {"Authorization": f"Bearer {activated.json()['access_token']}"}
+        teams = client.get("/api/teams", headers=member_headers)
+        assert teams.status_code == 200
+        assert teams.json()[0]["name"] == "全意团队"
+        assert any(member["email"] == "new.member@quanyi.local" for member in teams.json()[0]["members"])
+        assert client.get("/api/projects", headers=member_headers).json()[0]["id"] == "p-quanyi"
+        assert client.post(f"/api/invitations/{token}/accept", json={"name": "重复成员", "password": "secure-member-2026"}).status_code == 410
+
+
+def test_non_admin_cannot_invite_team_member() -> None:
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        response = client.post("/api/teams/team-quanyi/invitations", headers=headers, json={"email": "blocked@quanyi.local"})
+        assert response.status_code == 403
+
+
+def test_global_ceo_role_does_not_cross_team_boundary() -> None:
+    with Session(engine) as session:
+        observer = session.get(User, "u-observer")
+        assert observer is not None
+        session.add(Team(id="team-isolated", name="隔离团队"))
+        session.add(Project(id="project-isolated", team_id="team-isolated", name="隔离项目", client="内部", objective="权限隔离", owner_id=observer.id))
+        session.commit()
+
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        assert client.get("/api/projects/project-isolated", headers=headers).status_code == 403
+        assert client.post("/api/teams/team-isolated/invitations", headers=headers, json={"email": "isolated@quanyi.local"}).status_code == 403
+        assert client.post("/api/projects", headers=headers, json={"team_id": "team-isolated", "name": "越权项目"}).status_code == 403

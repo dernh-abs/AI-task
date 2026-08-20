@@ -7,7 +7,8 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from .models import AgentRun, AgentRunStatus, AuditEvent, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunStatus, AuditEvent, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TaskStatusHistory, TaskSubmission, User, utc_now
+from .permissions import can_manage_project
 from .schemas import TaskAction, TaskActionRequest
 
 
@@ -33,14 +34,14 @@ TRANSITIONS: dict[TaskAction, tuple[set[TaskStatus], TaskStatus]] = {
 
 
 def _is_owner(task: Task, actor: User) -> bool:
-    return task.owner_id == actor.id or actor.role == TeamRole.CEO
+    return task.owner_id == actor.id
 
 
 def _is_reviewer(task: Task, actor: User) -> bool:
-    return task.reviewer_id == actor.id or actor.role == TeamRole.CEO
+    return task.reviewer_id == actor.id
 
 
-def _guard(task: Task, action: TaskAction, actor: User, payload: TaskActionRequest) -> None:
+def _guard(session: Session, task: Task, action: TaskAction, actor: User, payload: TaskActionRequest) -> None:
     current = TaskStatus(task.status)
     allowed, _ = TRANSITIONS[action]
     if current not in allowed:
@@ -49,8 +50,10 @@ def _guard(task: Task, action: TaskAction, actor: User, payload: TaskActionReque
         raise DomainError(403, "FORBIDDEN", "Only the task owner can perform this action")
     if action in {"APPROVE", "RETURN"} and not _is_reviewer(task, actor):
         raise DomainError(403, "FORBIDDEN", "Only the reviewer can perform this action")
-    if action == "CANCEL" and actor.role != TeamRole.CEO:
-        raise DomainError(403, "FORBIDDEN", "Only a CEO can cancel a task in MVP")
+    if action == "CANCEL":
+        project = session.get(Project, task.project_id)
+        if not project or not can_manage_project(session, actor, project):
+            raise DomainError(403, "FORBIDDEN", "Only the project owner or team administrator can cancel a task")
     if action == "SUBMIT" and not any([payload.summary.strip(), payload.external_url, payload.asset_reference]):
         raise DomainError(422, "EMPTY_SUBMISSION", "A result summary, URL, or asset reference is required")
     if action in {"RETURN", "CANCEL"} and not payload.reason.strip():
@@ -77,7 +80,7 @@ def apply_task_action(session: Session, task: Task, action: TaskAction, actor: U
         return True
     if task.version != payload.expected_version:
         raise DomainError(409, "VERSION_CONFLICT", "Task was updated by another request")
-    _guard(task, action, actor, payload)
+    _guard(session, task, action, actor, payload)
     from_status = TaskStatus(task.status)
     _, to_status = TRANSITIONS[action]
     if action == "SUBMIT":
@@ -101,7 +104,8 @@ def apply_task_action(session: Session, task: Task, action: TaskAction, actor: U
         dependency = session.exec(select(ExternalDependency).where(ExternalDependency.task_id == task.id, ExternalDependency.external_feedback_status == ExternalFeedbackStatus.WAITING).order_by(ExternalDependency.created_at.desc())).first()
         if not dependency:
             raise DomainError(422, "EXTERNAL_DEPENDENCY_NOT_FOUND", "No active external dependency exists")
-        if actor.id not in {task.owner_id, dependency.internal_followup_user_id} and actor.role != TeamRole.CEO:
+        project = session.get(Project, task.project_id)
+        if actor.id not in {task.owner_id, dependency.internal_followup_user_id} and (not project or not can_manage_project(session, actor, project)):
             raise DomainError(403, "FORBIDDEN", "Only the task owner or internal follow-up owner can resume this task")
         dependency.external_feedback_status = ExternalFeedbackStatus.RECEIVED
         dependency.actual_received_at = utc_now()

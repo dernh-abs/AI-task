@@ -5,7 +5,8 @@ from uuid import uuid4
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
-from .models import AuditEvent, CandidateStatus, CandidateTask, ExecutionMode, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, TeamRole, User, utc_now
+from .models import AuditEvent, CandidateStatus, CandidateTask, ExecutionMode, IdempotencyRecord, Project, ProjectMember, Task, TaskStatus, User, utc_now
+from .permissions import can_manage_project
 from .schemas import CandidateRead
 from .state_machine import DomainError
 
@@ -27,7 +28,7 @@ def confirm_candidate(session: Session, candidate: CandidateTask, actor: User, e
     if candidate.version != expected_version:
         raise DomainError(409, "VERSION_CONFLICT", "Candidate was updated by another request")
     project = session.get(Project, candidate.project_id)
-    if not project or (actor.role != TeamRole.CEO and project.owner_id != actor.id):
+    if not project or not can_manage_project(session, actor, project):
         raise DomainError(403, "FORBIDDEN", "Only the project owner or CEO can confirm candidates")
     if not candidate.owner_id or not candidate.reviewer_id:
         raise DomainError(422, "ASSIGNMENT_REQUIRED", "Owner and reviewer are required")

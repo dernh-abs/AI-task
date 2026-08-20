@@ -16,6 +16,9 @@ export type ApiCandidate = components["schemas"]["CandidateRead"];
 export type ApiCandidateExtractionResponse = components["schemas"]["CandidateExtractionResponse"];
 export type ApiAgentRun = components["schemas"]["AgentRunRead"];
 export type ApiContribution = components["schemas"]["ContributionRead"];
+export type ApiInvitation = components["schemas"]["InvitationPublicRead"];
+export type ApiInvitationCreated = components["schemas"]["InvitationCreatedRead"];
+export type ApiTeam = components["schemas"]["TeamRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
 export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:(token:string)=>window.localStorage.setItem(TOKEN_KEY,token), clear:()=>window.localStorage.removeItem(TOKEN_KEY) };
@@ -23,12 +26,16 @@ export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:
 async function request<T>(path:string, options:RequestInit={}):Promise<T> {
   const token=tokenStore.get();
   const response=await fetch(API_BASE+path,{...options,headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`} : {}),...options.headers}});
-  if(!response.ok){let message=`请求失败（${response.status}）`;try{const body=await response.json();message=typeof body.detail==="string"?body.detail:body.detail?.message||message;}catch{/* status fallback */}throw new ApiError(response.status,message);}
+  if(!response.ok){let message=`请求失败（${response.status}）`;try{const body=await response.json();message=typeof body.detail==="string"?body.detail:body.detail?.message||body.detail?.[0]?.msg||message;}catch{/* status fallback */}throw new ApiError(response.status,message);}
   return response.json() as Promise<T>;
 }
 
 export const login=(email:string,password:string)=>request<TokenResponse>("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
 export const fetchMe=()=>request<ApiUser>("/auth/me");
+export const inspectInvitation=(token:string)=>request<ApiInvitation>(`/invitations/${encodeURIComponent(token)}`);
+export const acceptInvitation=(token:string,payload:components["schemas"]["InvitationAcceptRequest"])=>request<TokenResponse>(`/invitations/${encodeURIComponent(token)}/accept`,{method:"POST",body:JSON.stringify(payload)});
+export const fetchTeams=()=>request<ApiTeam[]>("/teams");
+export const createTeamInvitation=(teamId:string,payload:components["schemas"]["InvitationCreateRequest"])=>request<ApiInvitationCreated>(`/teams/${teamId}/invitations`,{method:"POST",body:JSON.stringify(payload)});
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
 export const createProject=(payload:components["schemas"]["ProjectCreateRequest"])=>request<ApiProject>("/projects",{method:"POST",body:JSON.stringify(payload)});
 export const createStage=(projectId:string,payload:components["schemas"]["StageCreateRequest"])=>request<ApiProject>(`/projects/${projectId}/stages`,{method:"POST",body:JSON.stringify(payload)});

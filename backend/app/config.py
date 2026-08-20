@@ -43,7 +43,7 @@ def load_settings() -> Settings:
         jwt_secret=os.getenv("JWT_SECRET", "local-development-secret-change-me"),
         jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "480")),
         cors_origins=tuple(item.strip() for item in origins.split(",") if item.strip()),
-        seed_demo_data=_as_bool(os.getenv("SEED_DEMO_DATA"), True),
+        seed_demo_data=_as_bool(os.getenv("SEED_DEMO_DATA"), False),
         ai_mode=os.getenv("AI_MODE", "mock").lower(),
         ai_provider=os.getenv("AI_PROVIDER", "dashscope").lower(),
         qwen_api_key=os.getenv("QWEN_API_KEY"),

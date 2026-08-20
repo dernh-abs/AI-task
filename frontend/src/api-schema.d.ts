@@ -55,6 +55,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Teams */
+        get: operations["list_teams_api_teams_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/teams/{team_id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invite Team Member */
+        post: operations["invite_team_member_api_teams__team_id__invitations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invitations/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect Invitation */
+        get: operations["inspect_invitation_api_invitations__token__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/invitations/{token}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Invitation */
+        post: operations["activate_invitation_api_invitations__token__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -608,6 +676,56 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** InvitationAcceptRequest */
+        InvitationAcceptRequest: {
+            /** Name */
+            name: string;
+            /** Password */
+            password: string;
+        };
+        /** InvitationCreateRequest */
+        InvitationCreateRequest: {
+            /** Email */
+            email: string;
+            /** @default MEMBER */
+            role: components["schemas"]["TeamRole"];
+            /** Project Id */
+            project_id?: string | null;
+            project_role?: components["schemas"]["ProjectRole"] | null;
+        };
+        /** InvitationCreatedRead */
+        InvitationCreatedRead: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Team Id */
+            team_id: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Activation Token */
+            activation_token: string;
+        };
+        /** InvitationPublicRead */
+        InvitationPublicRead: {
+            /** Email */
+            email: string;
+            /** Team Name */
+            team_name: string;
+            /** Inviter Name */
+            inviter_name: string;
+            role: components["schemas"]["TeamRole"];
+            /** Project Name */
+            project_name?: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Email */
@@ -617,6 +735,8 @@ export interface components {
         };
         /** ProjectCreateRequest */
         ProjectCreateRequest: {
+            /** Team Id */
+            team_id?: string | null;
             /** Name */
             name: string;
             /**
@@ -667,6 +787,11 @@ export interface components {
             /** Stages */
             stages: components["schemas"]["StageRead"][];
         };
+        /**
+         * ProjectRole
+         * @enum {string}
+         */
+        ProjectRole: "OWNER" | "MEMBER" | "VIEWER";
         /** ProjectUpdateRequest */
         ProjectUpdateRequest: {
             /** Name */
@@ -888,6 +1013,30 @@ export interface components {
          * @enum {string}
          */
         TaskStatus: "PENDING_OWNER_CONFIRMATION" | "TODO" | "IN_PROGRESS" | "WAITING_EXTERNAL" | "BLOCKED" | "WAITING_HUMAN_CONFIRMATION" | "WAITING_REVIEW" | "DONE" | "CANCELED";
+        /** TeamMemberRead */
+        TeamMemberRead: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Name */
+            name: string;
+            role: components["schemas"]["TeamRole"];
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** TeamRead */
+        TeamRead: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            role: components["schemas"]["TeamRole"];
+            /** Members */
+            members: components["schemas"]["TeamMemberRead"][];
+            /** Project Names */
+            project_names: string[];
+        };
         /**
          * TeamRole
          * @enum {string}
@@ -1009,6 +1158,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    list_teams_api_teams_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamRead"][];
+                };
+            };
+        };
+    };
+    invite_team_member_api_teams__team_id__invitations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationCreatedRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    inspect_invitation_api_invitations__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPublicRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_invitation_api_invitations__token__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

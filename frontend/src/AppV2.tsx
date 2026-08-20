@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeams, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -126,6 +126,7 @@ type HubContextValue = {
   setContributions: React.Dispatch<React.SetStateAction<string[]>>;
   activeTeamId: string;
   setActiveTeamId: React.Dispatch<React.SetStateAction<string>>;
+  teams: TeamWorkspace[];
   notify: (message: string) => void;
   addNotification: (notification: Omit<HubNotification, "id" | "createdAt" | "read">) => void;
   openTask: (task: Task) => void;
@@ -295,37 +296,21 @@ type TeamWorkspace = {
   members: string[];
   projects: string[];
   tone: "blue" | "violet" | "amber";
+  memberDetails?: ApiTeam["members"];
 };
 
-const teamWorkspaces: TeamWorkspace[] = [
-  {
-    id: "team-quanyi",
-    name: "全意内部",
-    description: "公司级协作空间，承载跨项目任务、知识和 AI 工作。",
-    role: "成员",
-    members: [...teamMembers],
-    projects: ["全意 AI 工作中枢", "内部知识共建"],
-    tone: "blue",
-  },
-  {
-    id: "team-fannal",
-    name: "凡诺项目组",
-    description: "围绕凡诺官网升级持续推进产品、内容与交付。",
-    role: "成员",
-    members: ["徐泉", "廖婉琛", "曹玉祥", "顾一健", "项仪"],
-    projects: ["凡诺 AI 官网升级"],
-    tone: "violet",
-  },
-  {
-    id: "team-kangfulai",
-    name: "康福来项目组",
-    description: "康福来官网重构项目的客户资料与交付协作组。",
-    role: "成员",
-    members: ["徐泉", "廖婉琛", "TRoY", "项白"],
-    projects: ["康福来官网重构"],
-    tone: "amber",
-  },
-];
+const teamFromApi = (team: ApiTeam, index: number): TeamWorkspace => ({
+  id: team.id,
+  name: team.name,
+  description: "真实团队协作空间；成员与项目范围由服务端权限控制。",
+  role: team.role === "CEO" ? "CEO" : "成员",
+  members: team.members.filter((member) => member.is_active).map((member) => member.name),
+  memberDetails: team.members,
+  projects: team.project_names,
+  tone: (["blue", "violet", "amber"] as const)[index % 3],
+});
+
+const emptyTeam: TeamWorkspace = { id:"", name:"尚未加入团队", description:"请通过管理员邀请加入团队。", role:"成员", members:[], projects:[], tone:"blue", memberDetails:[] };
 
 const extractionBatches: Record<ExtractionSource, ExtractionBatch> = {
   meeting: {
@@ -593,6 +578,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   const [assets, setAssets] = useState<Asset[]>(initialAssets);
   const [knowledgePages, setKnowledgePages] = useState<KnowledgePage[]>(initialKnowledgePages);
   const [notifications, setNotifications] = useState<HubNotification[]>(initialNotifications);
+  const [teams, setTeams] = useState<TeamWorkspace[]>([]);
   const [contributions, setContributions] = useState<string[]>([
     "完成任务「品牌视觉规范初稿」 · +8",
     "解决求助「GEO 问题库结构」 · +5",
@@ -600,7 +586,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   ]);
   const [activeTeamId, setActiveTeamId] = useState(() => {
     const savedTeamId = window.localStorage.getItem("quanyi-active-team");
-    return teamWorkspaces.some((team) => team.id === savedTeamId) ? savedTeamId! : "team-quanyi";
+    return savedTeamId || "";
   });
   const [toast, setToast] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
@@ -616,10 +602,13 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     let active = true;
     setDataLoading(true);
     setDataError("");
-    Promise.all([fetchProjects(), fetchTasks()]).then(([projectRows, taskRows]) => {
+    Promise.all([fetchProjects(), fetchTasks(), fetchTeams()]).then(([projectRows, taskRows, teamRows]) => {
       if (!active) return;
       setProjects(projectRows.map(projectFromApi));
       setTasks(taskRows.map(taskFromApi));
+      const mappedTeams = teamRows.map(teamFromApi);
+      setTeams(mappedTeams);
+      setActiveTeamId((current) => mappedTeams.some((team) => team.id === current) ? current : mappedTeams[0]?.id || "");
     }).catch(() => {
       if (active) setDataError("无法读取服务端项目数据，请确认后端已启动");
     }).finally(() => {
@@ -664,6 +653,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     setContributions,
     activeTeamId,
     setActiveTeamId,
+    teams,
     notify,
     addNotification,
     openTask: (task) => navigate(task.status === "ai" ? "/agent?run=run-" + task.id : "/tasks/" + task.id),
@@ -715,14 +705,14 @@ const resourceNav = [
 ];
 
 function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile: () => void }) {
-  const { activeTeamId, candidates, tasks } = useHub();
+  const { activeTeamId, candidates, tasks, teams } = useHub();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const runCount = tasks.filter((task) => task.status === "ai").length;
   const previewIdentity = { name: user.name, role: user.role === "CEO" ? "CEO" : "团队成员" };
-  const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   return (
     <>
       {mobileOpen && <button aria-label="关闭导航" className="mobile-scrim" onClick={closeMobile} />}
@@ -884,7 +874,7 @@ function Shell() {
 }
 
 function Dashboard() {
-  const { tasks, candidates, activeTeamId, openTask, openCandidate, openPreview } = useHub();
+  const { tasks, candidates, activeTeamId, teams, openTask, openCandidate, openPreview } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -899,7 +889,7 @@ function Dashboard() {
   const [assignedSource, setAssignedSource] = useState<ExtractionSource | null>(requestedAssignedSource);
   const [todayOpen, setTodayOpen] = useState(false);
   const [assistantPrompt, setAssistantPrompt] = useState("");
-  const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const currentUser = user.name;
   const personalTasks = tasks
     .filter((task) => task.owner === currentUser || task.collaborators.includes(currentUser))
@@ -3060,44 +3050,53 @@ function TeamMemberStack({ members, limit = 5 }: { members: string[]; limit?: nu
   return <span className="team-avatar-stack" aria-label={`${members.length} 位成员`}>{visible.map((name) => <Avatar key={name} name={name} size="sm"/>)}{remaining > 0 && <i>+{remaining}</i>}</span>;
 }
 
+function InviteTeamMember({team,onClose}:{team:TeamWorkspace;onClose:()=>void}) {
+  const { notify } = useHub();
+  const [email,setEmail] = useState("");
+  const [role,setRole] = useState<"MEMBER"|"CEO">("MEMBER");
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  const [activationLink,setActivationLink] = useState("");
+  const submit = async(event:FormEvent) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const result = await createTeamInvitation(team.id,{email:email.trim(),role,project_id:null,project_role:null});
+      const url = new URL(import.meta.env.BASE_URL || "/",window.location.origin);
+      url.searchParams.set("invite",result.activation_token);
+      setActivationLink(url.toString());
+      notify("一次性邀请链接已生成，有效期 72 小时");
+    } catch(reason) { setError(reason instanceof ApiError ? reason.message : "邀请创建失败"); }
+    finally { setBusy(false); }
+  };
+  const copy = async() => { await navigator.clipboard.writeText(activationLink); notify("邀请链接已复制"); };
+  return <AppModal title={`邀请成员加入「${team.name}」`} subtitle="邀请链接只能使用一次；对方激活后才会成为真实团队成员。" onClose={onClose}>
+    {!activationLink?<form className="form-stack" onSubmit={submit}><label><span>受邀邮箱</span><input autoFocus type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="name@company.com"/></label><label><span>团队角色</span><select value={role} onChange={(event)=>setRole(event.target.value as "MEMBER"|"CEO")}><option value="MEMBER">团队成员</option><option value="CEO">团队管理员</option></select></label>{error&&<p className="login-error">{error}</p>}<div className="permission-note"><ShieldCheck size={17}/><span>本阶段不会自动发送邮件，请复制链接并通过可信渠道单独发送给受邀成员。</span></div><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy||!email.includes("@")}><UserPlus size={16}/>{busy?"正在创建…":"生成邀请链接"}</button></footer></form>:<div className="form-stack"><div className="permission-note"><CheckCircle2 size={17}/><span>邀请已创建。对方使用后链接立即失效。</span></div><label><span>一次性激活链接</span><textarea readOnly value={activationLink}/></label><footer className="modal-actions"><button className="button secondary" onClick={onClose}>完成</button><button className="button primary" onClick={copy}>复制邀请链接</button></footer></div>}
+  </AppModal>;
+}
+
 function TeamsPage() {
-  const { activeTeamId, setActiveTeamId, notify, openPreview } = useHub();
-  const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
+  const { activeTeamId, setActiveTeamId, teams, notify, openPreview } = useHub();
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
+  const [inviteOpen,setInviteOpen] = useState(false);
   const showMembers = (team: TeamWorkspace) => openPreview({
     eyebrow: "团队成员",
     title: team.name,
     description: `${team.members.length} 位成员共同参与这个团队的项目、任务、知识和 AI 工作。`,
-    items: team.members.map((name) => ({title:name,detail:name === "徐泉" ? "CEO · 组织负责人" : name === "廖婉琛" ? `${team.role} · 当前账号` : memberRole(name)})),
-    note: "团队成员关系决定可见入口，具体项目和资产仍按各自权限控制。",
+    items: (team.memberDetails||[]).map((member) => ({title:member.name,detail:`${member.role === "CEO" ? "团队管理员" : "团队成员"} · ${member.email}${member.is_active ? "" : " · 已停用"}`})),
+    note: "成员数据来自服务端；具体项目和资产仍按各自权限控制。",
     primaryLabel: "关闭成员列表",
   });
   const switchTeam = (team: TeamWorkspace) => {
     setActiveTeamId(team.id);
     notify(`当前工作团队已切换为「${team.name}」`);
   };
-  const joinTeam = () => openPreview({
-    eyebrow: "加入团队",
-    title: "通过邀请加入已有团队",
-    description: "输入团队邀请码或打开成员发来的邀请链接。",
-    items: [{title:"验证邀请",detail:"确认团队名称、邀请人和你的角色"},{title:"查看授权范围",detail:"加入团队不等于自动获得全部项目权限"},{title:"完成加入",detail:"团队会出现在「我的团队」列表中"}],
-    note: "一个账号可以同时加入多个团队，并随时切换当前工作范围。",
-    primaryLabel: "模拟加入团队",
-  });
-  const createTeam = () => openPreview({
-    eyebrow: "新建团队",
-    title: "创建一个新的协作团队",
-    description: "适用于新的公司、业务组或需要长期独立协作的项目团队。",
-    items: [{title:"填写团队信息",detail:"团队名称、用途和负责人"},{title:"邀请初始成员",detail:"从现有组织成员中选择或发送外部邀请"},{title:"设置默认权限",detail:"决定项目、知识和 AI 能力的初始可见范围"}],
-    note: "临时任务协作不需要单独建组，可以直接在任务或项目 AI 对话中邀请成员。",
-    primaryLabel: "开始创建",
-  });
   return <div className="teams-page">
-    <PageHeader title="我的团队" description="查看你加入的团队，并切换当前工作的组织范围。" action={<><button className="button secondary" onClick={joinTeam}><UserPlus size={16}/> 加入团队</button><button className="button primary" onClick={createTeam}><Plus size={16}/> 新建团队</button></>} />
+    <PageHeader title="我的团队" description="查看真实团队成员，并切换当前工作的组织范围。" action={activeTeam.role === "CEO" && activeTeam.id ? <button className="button primary" onClick={()=>setInviteOpen(true)}><UserPlus size={16}/> 邀请成员</button> : undefined} />
     <div className="teams-page-grid">
       <section className="panel team-list-panel">
-        <header><div><span className="section-kicker">TEAM WORKSPACES</span><h2>我加入的团队</h2><p>团队是稳定的成员与权限范围，项目则在团队内部创建。</p></div><span className="team-total">{teamWorkspaces.length} 个团队</span></header>
+        <header><div><span className="section-kicker">TEAM WORKSPACES</span><h2>我加入的团队</h2><p>团队和成员关系均从服务端读取。</p></div><span className="team-total">{teams.length} 个团队</span></header>
         <div className="team-workspace-list">
-          {teamWorkspaces.map((team) => {
+          {teams.map((team) => {
             const isActive = team.id === activeTeam.id;
             return <article className={`team-workspace-card ${team.tone}${isActive ? " active" : ""}`} key={team.id}>
               <span className="team-workspace-mark">{team.name.slice(0, 1)}</span>
@@ -3119,14 +3118,16 @@ function TeamsPage() {
         </section>
         <section className="panel team-scope-note"><h3>切换团队会发生什么？</h3><p>工作台、项目空间、任务与知识会优先显示当前团队的内容；个人 AI 助手仍可在你有权限的多个团队间检索。</p><button className="text-button" onClick={() => openPreview({eyebrow:"团队与权限",title:"团队范围如何生效",description:"团队负责组织成员和工作范围，项目负责承载具体目标与交付。",items:[{title:"当前团队",detail:"决定工作台默认呈现的项目、任务和知识"},{title:"跨团队访问",detail:"个人 AI 只检索你在其他团队中已经获得授权的内容"},{title:"项目权限",detail:"加入团队后仍需按项目授予编辑或查看权限"}],note:"切换团队不会退出其他团队，也不会改变已有权限。",primaryLabel:"我知道了"})}>了解团队与权限 <ArrowRight size={14}/></button></section>
       </aside>
+      {inviteOpen&&<InviteTeamMember team={activeTeam} onClose={()=>setInviteOpen(false)}/>}
     </div>
   </div>;
 }
 
 function SettingsPage() {
-  const { activeTeamId, notify } = useHub();
+  const { activeTeamId, teams, notify } = useHub();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const activeTeam = teamWorkspaces.find((team) => team.id === activeTeamId) || teamWorkspaces[0];
+  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const [tab, setTab] = useState("个人设置");
   const [settings, setSettings] = useState({task:true,mention:true,ai:true,weekly:false,confirm:true,assets:true});
   const toggle = (key: keyof typeof settings) => setSettings((value) => ({...value,[key]:!value[key]}));
@@ -3135,7 +3136,7 @@ function SettingsPage() {
     <div className="settings-layout">
       <aside className="panel settings-nav">{["个人设置","通知规则","AI 与权限"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}<ChevronRight size={15}/></button>)}</aside>
       <section className="panel settings-main">
-        {tab === "个人设置" && <><div className="settings-profile"><Avatar name="廖婉琛" size="lg"/><div><h2>廖婉琛</h2><p>成员 · 当前团队：{activeTeam.name}</p></div><button className="button secondary compact" onClick={() => notify("头像上传入口已打开")}>更换头像</button></div><div className="settings-form"><label><span>显示名称</span><input defaultValue="廖婉琛"/></label><label><span>岗位 / 角色</span><input defaultValue="成员"/></label><label><span>默认工作周期</span><select><option>本周</option><option>今天</option><option>本月</option></select></label></div><div className="settings-team-redirect"><Users size={19}/><div><strong>团队不再放在个人设置中</strong><p>查看已加入的团队、切换当前团队或查看成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
+        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期</span><select><option>本周</option><option>今天</option><option>本月</option></select></label></div><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
         {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则</h2><p>任务通知、@提及和 AI 结果统一进入顶部通知中心。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
         {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限</h2><p>定义 AI 能读取什么，以及哪些动作必须等待人工确认。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","只读取当前成员有权访问的文件和页面"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>AI 的读取权限不会超过当前操作成员；所有关键写入都会保留审计记录。</span></div></>}
       </section>

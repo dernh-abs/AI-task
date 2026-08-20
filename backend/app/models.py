@@ -97,6 +97,21 @@ class TeamMember(SQLModel, table=True):
     role: TeamRole = Field(sa_column=Column(String(32), nullable=False))
 
 
+class Invitation(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    team_id: str = Field(foreign_key="team.id", index=True)
+    email: str = Field(sa_column=Column(String(255), index=True, nullable=False))
+    role: TeamRole = Field(sa_column=Column(String(32), nullable=False))
+    project_id: str | None = Field(default=None, foreign_key="project.id", index=True)
+    project_role: ProjectRole | None = Field(default=None, sa_column=Column(String(32), nullable=True))
+    token_hash: str = Field(sa_column=Column(String(64), unique=True, index=True, nullable=False))
+    invited_by: str = Field(foreign_key="user.id", index=True)
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class Project(SQLModel, table=True):
     id: str = Field(primary_key=True)
     team_id: str = Field(foreign_key="team.id", index=True)

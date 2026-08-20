@@ -13,14 +13,15 @@ from sqlmodel import Session, select
 
 from .config import load_settings
 from .agent_runs import recover_stale_runs, start_agent_run
+from .accounts import accept_invitation, create_team_invitation, invitation_public_read, readable_teams
 from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates
 from .models import AgentRun, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User
-from .permissions import can_read_project, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, LoginRequest, ProjectCreateRequest, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TokenResponse, UserRead
+from .permissions import can_manage_project, can_read_project, is_team_admin, readable_project_ids
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -68,7 +69,7 @@ def health() -> dict[str, str]:
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
     user = session.exec(select(User).where(User.email == payload.email.lower())).first()
-    if not user or not verify_password(payload.password, user.password_hash):
+    if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     token, expires_in = create_access_token(user.id)
     return TokenResponse(access_token=token, expires_in=expires_in, user=UserRead(id=user.id, email=user.email, name=user.name, role=user.role))
@@ -77,6 +78,27 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Tok
 @app.get("/api/auth/me", response_model=UserRead)
 def me(user: User = Depends(get_current_user)) -> UserRead:
     return UserRead(id=user.id, email=user.email, name=user.name, role=user.role)
+
+
+@app.get("/api/teams", response_model=list[TeamRead])
+def list_teams(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[TeamRead]:
+    return readable_teams(session, user)
+
+
+@app.post("/api/teams/{team_id}/invitations", response_model=InvitationCreatedRead)
+def invite_team_member(team_id: str, payload: InvitationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationCreatedRead:
+    invitation, token = create_team_invitation(session, team_id, payload, user)
+    return InvitationCreatedRead(id=invitation.id, email=invitation.email, team_id=invitation.team_id, expires_at=invitation.expires_at, activation_token=token)
+
+
+@app.get("/api/invitations/{token}", response_model=InvitationPublicRead)
+def inspect_invitation(token: str, session: Session = Depends(get_session)) -> InvitationPublicRead:
+    return invitation_public_read(session, token)
+
+
+@app.post("/api/invitations/{token}/accept", response_model=TokenResponse)
+def activate_invitation(token: str, payload: InvitationAcceptRequest, session: Session = Depends(get_session)) -> TokenResponse:
+    return accept_invitation(session, token, payload)
 
 
 @app.get("/api/projects", response_model=list[ProjectRead])
@@ -106,11 +128,12 @@ def list_tasks(project_id: str | None = None, user: User = Depends(get_current_u
 
 @app.post("/api/projects", response_model=ProjectRead)
 def create_project(payload: ProjectCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> ProjectRead:
-    if user.role != TeamRole.CEO:
-        raise HTTPException(status_code=403, detail="Only CEO can create projects in MVP")
-    membership = session.exec(select(TeamMember).where(TeamMember.user_id == user.id)).first()
+    admin_memberships = session.exec(select(TeamMember).where(TeamMember.user_id == user.id, TeamMember.role == TeamRole.CEO)).all()
+    membership = next((item for item in admin_memberships if item.team_id == payload.team_id), None) if payload.team_id else (admin_memberships[0] if len(admin_memberships) == 1 else None)
     if not membership:
-        raise HTTPException(status_code=422, detail="User does not belong to a team")
+        if len(admin_memberships) > 1 and not payload.team_id:
+            raise HTTPException(status_code=422, detail="team_id is required when administering multiple teams")
+        raise HTTPException(status_code=403, detail="Only a team administrator can create projects")
     project = Project(id=f"project-{uuid4().hex}", team_id=membership.team_id, name=payload.name, client=payload.client, objective=payload.objective, owner_id=user.id, next_milestone=payload.next_milestone, due_at=payload.due_at)
     session.add(project)
     session.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
@@ -123,7 +146,7 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = 
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if user.role != TeamRole.CEO and project.owner_id != user.id:
+    if not can_manage_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project edit denied")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
@@ -137,7 +160,7 @@ def create_stage(project_id: str, payload: StageCreateRequest, user: User = Depe
     project = session.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if user.role != TeamRole.CEO and project.owner_id != user.id:
+    if not can_manage_project(session, user, project):
         raise HTTPException(status_code=403, detail="Stage edit denied")
     if project.owner_id != payload.owner_id and not session.get(ProjectMember, (project.id, payload.owner_id)):
         raise HTTPException(status_code=422, detail="Stage owner must be a project member")
@@ -153,7 +176,7 @@ def update_stage(stage_id: str, payload: StageUpdateRequest, user: User = Depend
     if not stage:
         raise HTTPException(status_code=404, detail="Stage not found")
     project = session.get(Project, stage.project_id)
-    if not project or (user.role != TeamRole.CEO and project.owner_id != user.id and stage.owner_id != user.id):
+    if not project or (not can_manage_project(session, user, project) and stage.owner_id != user.id):
         raise HTTPException(status_code=403, detail="Stage edit denied")
     if payload.status is not None:
         allowed = {StageStatus.PLANNED: {StageStatus.ACTIVE}, StageStatus.ACTIVE: {StageStatus.WAITING_REVIEW}, StageStatus.WAITING_REVIEW: {StageStatus.DONE, StageStatus.ACTIVE}, StageStatus.DONE: set()}
@@ -171,7 +194,7 @@ def create_task(payload: TaskCreateRequest, user: User = Depends(get_current_use
     project = session.get(Project, payload.project_id)
     if not project or not can_read_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project access denied")
-    if user.role != TeamRole.CEO and project.owner_id != user.id and payload.owner_id != user.id:
+    if not can_manage_project(session, user, project) and payload.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Members can only create tasks assigned to themselves")
     for target in {payload.owner_id, payload.reviewer_id}:
         if project.owner_id != target and not session.get(ProjectMember, (project.id, target)):
@@ -366,7 +389,12 @@ def task_agent_runs(task_id: str, user: User = Depends(get_current_user), sessio
 
 @app.get("/api/contributions", response_model=list[ContributionRead])
 def contributions(user_id: str | None = None, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[ContributionRead]:
-    target_user_id = user_id if user.role == TeamRole.CEO and user_id else user.id
+    shared_admin_team = False
+    if user_id and user_id != user.id:
+        administered_team_ids = set(session.exec(select(TeamMember.team_id).where(TeamMember.user_id == user.id, TeamMember.role == TeamRole.CEO)).all())
+        target_team_ids = set(session.exec(select(TeamMember.team_id).where(TeamMember.user_id == user_id)).all())
+        shared_admin_team = bool(administered_team_ids & target_team_ids)
+    target_user_id = user_id if user_id and shared_admin_team else user.id
     rows = session.exec(select(ContributionEvent).where(ContributionEvent.user_id == target_user_id).order_by(ContributionEvent.created_at.desc())).all()
     names = {item.id: item.name for item in session.exec(select(User)).all()}
     return [ContributionRead(id=row.id, task_id=row.task_id, user_id=row.user_id, user_name=names.get(row.user_id, "未指定"), event_type=row.event_type, submission_version=row.submission_version, points=row.points, created_at=row.created_at) for row in rows]

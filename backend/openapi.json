@@ -88,6 +88,175 @@
         ]
       }
     },
+    "/api/teams": {
+      "get": {
+        "summary": "List Teams",
+        "operationId": "list_teams_api_teams_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TeamRead"
+                  },
+                  "type": "array",
+                  "title": "Response List Teams Api Teams Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/teams/{team_id}/invitations": {
+      "post": {
+        "summary": "Invite Team Member",
+        "operationId": "invite_team_member_api_teams__team_id__invitations_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Team Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationCreatedRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invitations/{token}": {
+      "get": {
+        "summary": "Inspect Invitation",
+        "operationId": "inspect_invitation_api_invitations__token__get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationPublicRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/invitations/{token}/accept": {
+      "post": {
+        "summary": "Activate Invitation",
+        "operationId": "activate_invitation_api_invitations__token__accept_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationAcceptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects": {
       "get": {
         "summary": "List Projects",
@@ -1869,6 +2038,146 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "InvitationAcceptRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 2,
+            "title": "Name"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 72,
+            "minLength": 10,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "password"
+        ],
+        "title": "InvitationAcceptRequest"
+      },
+      "InvitationCreateRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Email"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TeamRole",
+            "default": "MEMBER"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "project_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "InvitationCreateRequest"
+      },
+      "InvitationCreatedRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "team_id": {
+            "type": "string",
+            "title": "Team Id"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "activation_token": {
+            "type": "string",
+            "title": "Activation Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "team_id",
+          "expires_at",
+          "activation_token"
+        ],
+        "title": "InvitationCreatedRead"
+      },
+      "InvitationPublicRead": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "team_name": {
+            "type": "string",
+            "title": "Team Name"
+          },
+          "inviter_name": {
+            "type": "string",
+            "title": "Inviter Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TeamRole"
+          },
+          "project_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Name"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "team_name",
+          "inviter_name",
+          "role",
+          "expires_at"
+        ],
+        "title": "InvitationPublicRead"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -1889,6 +2198,17 @@
       },
       "ProjectCreateRequest": {
         "properties": {
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
           "name": {
             "type": "string",
             "maxLength": 200,
@@ -2012,6 +2332,15 @@
           "stages"
         ],
         "title": "ProjectRead"
+      },
+      "ProjectRole": {
+        "type": "string",
+        "enum": [
+          "OWNER",
+          "MEMBER",
+          "VIEWER"
+        ],
+        "title": "ProjectRole"
       },
       "ProjectUpdateRequest": {
         "properties": {
@@ -2665,6 +2994,76 @@
           "CANCELED"
         ],
         "title": "TaskStatus"
+      },
+      "TeamMemberRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TeamRole"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "name",
+          "role",
+          "is_active"
+        ],
+        "title": "TeamMemberRead"
+      },
+      "TeamRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TeamRole"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/TeamMemberRead"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "project_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Project Names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role",
+          "members",
+          "project_names"
+        ],
+        "title": "TeamRead"
       },
       "TeamRole": {
         "type": "string",

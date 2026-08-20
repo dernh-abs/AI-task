@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .models import ExecutionMode, StageStatus, TaskStatus, TeamRole
+from .models import ExecutionMode, ProjectRole, StageStatus, TaskStatus, TeamRole
 
 
 class ApiModel(BaseModel):
@@ -36,6 +36,73 @@ class TokenResponse(ApiModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
+
+
+class InvitationCreateRequest(ApiModel):
+    email: str = Field(min_length=3, max_length=255)
+    role: TeamRole = TeamRole.MEMBER
+    project_id: str | None = None
+    project_role: ProjectRole | None = None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized:
+            raise ValueError("请输入有效邮箱")
+        return normalized
+
+
+class InvitationCreatedRead(ApiModel):
+    id: str
+    email: str
+    team_id: str
+    expires_at: datetime
+    activation_token: str
+
+
+class InvitationPublicRead(ApiModel):
+    email: str
+    team_name: str
+    inviter_name: str
+    role: TeamRole
+    project_name: str | None = None
+    expires_at: datetime
+
+
+class InvitationAcceptRequest(ApiModel):
+    name: str = Field(min_length=2, max_length=80)
+    password: str = Field(min_length=10, max_length=72)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("password")
+    @classmethod
+    def strong_password(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("密码编码后不能超过 72 字节")
+        if not any(character.isalpha() for character in value) or not any(character.isdigit() for character in value):
+            raise ValueError("密码必须同时包含字母和数字")
+        return value
+
+
+class TeamMemberRead(ApiModel):
+    id: str
+    email: str
+    name: str
+    role: TeamRole
+    is_active: bool
+
+
+class TeamRead(ApiModel):
+    id: str
+    name: str
+    role: TeamRole
+    members: list[TeamMemberRead]
+    project_names: list[str]
 
 
 class StageRead(ApiModel):
@@ -243,6 +310,7 @@ class AgentRunStartResponse(ApiModel):
 
 
 class ProjectCreateRequest(ApiModel):
+    team_id: str | None = None
     name: str = Field(min_length=1, max_length=200)
     client: str = "内部"
     objective: str = ""
