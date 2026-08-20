@@ -24,6 +24,8 @@ chmod 600 .env.test
 
 编辑 `.env.test`，至少替换：
 
+- `POSTGRES_DB`：应用阶段使用独立数据库名，例如 `quanyi_app`；
+- `POSTGRES_USER`：应用阶段使用独立数据库用户，例如 `quanyi_app`；
 - `POSTGRES_PASSWORD`：数据库专用随机密码；
 - `JWT_SECRET`：不少于 32 字节的随机密钥；
 - `APP_ORIGIN`：测试环境实际访问地址。
@@ -53,6 +55,28 @@ curl --fail http://127.0.0.1:3389/api/health
 
 健康响应中的 `database` 必须为 `postgresql`。
 
+## 从测试数据切换到新应用数据库
+
+不要删除或复用原测试数据卷。使用新的 Compose 项目名启动应用阶段栈，会创建独立的 PostgreSQL 数据卷：
+
+```bash
+docker compose ls
+docker compose --env-file .env.test -f compose.test.yml -p ai-task stop frontend backend
+docker compose --env-file .env.application -f compose.test.yml -p ai-task-app up -d --build
+docker compose --env-file .env.application -f compose.test.yml -p ai-task-app ps
+```
+
+`.env.application` 必须设置 `POSTGRES_DB=quanyi_app`、`POSTGRES_USER=quanyi_app`、`SEED_DEMO_DATA=false`。旧项目的 `postgres_data` 卷继续保留，只停止旧前后端以释放站点端口；禁止执行 `down -v`。
+
+首次迁移完成后，在后端容器里交互式创建首位管理员：
+
+```bash
+docker compose --env-file .env.application -f compose.test.yml -p ai-task-app exec backend \
+  python -m app.admin_cli create-admin --email owner@example.com --name "团队负责人" --team "团队名称"
+```
+
+密码由终端交互读取，不得放进 `.env.application` 或命令参数。
+
 示例使用 3389 是为了适配当前测试服务器的防火墙规则，且不得让 Compose 直接抢占已有的 80/443。域名反向代理验收完成后，设置 `APP_BIND_ADDRESS=127.0.0.1`，避免容器端口继续暴露到公网。
 
 ## 更新部署
@@ -79,7 +103,7 @@ docker compose --env-file .env.test -f compose.test.yml up -d --build
 
 ```bash
 docker compose --env-file .env.test -f compose.test.yml exec -T db \
-  pg_dump -U quanyi -d quanyi_mvp -Fc > quanyi_mvp.dump
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > quanyi_app.dump
 ```
 
 备份文件包含测试业务数据，应按敏感数据保存，不得提交 Git。

@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: quanyi_mvp
-      POSTGRES_USER: quanyi
+      POSTGRES_DB: ${POSTGRES_DB:-quanyi_app}
+      POSTGRES_USER: ${POSTGRES_USER:-quanyi_app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.test}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quanyi -d quanyi_mvp"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -21,11 +21,11 @@ services:
       context: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://quanyi:${POSTGRES_PASSWORD}@db:5432/quanyi_mvp
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-quanyi_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-quanyi_app}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.test}
       JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
       CORS_ORIGINS: ${APP_ORIGIN:-http://127.0.0.1}
-      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
       AUTO_CREATE_SCHEMA: "false"
       AI_MODE: ${AI_MODE:-mock}
       AI_PROVIDER: ${AI_PROVIDER:-ollama}

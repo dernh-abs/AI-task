@@ -10,6 +10,14 @@
 
 ## 1. 迁移空数据库
 
+应用阶段使用新的 Compose 项目名和数据卷，保留原测试库但不复用：
+
+```bash
+docker compose --env-file .env.application -f compose.test.yml -p ai-task-app up -d --build
+```
+
+确认 `.env.application` 中 `POSTGRES_DB=quanyi_app` 且 `SEED_DEMO_DATA=false`。
+
 ```bash
 cd /app
 alembic upgrade head
