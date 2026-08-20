@@ -97,6 +97,8 @@ import { ApiError, confirmCandidate, createCandidateExtraction, createProject, c
 import { useAuth } from "./auth";
 import "./workHub.css";
 
+const demoDataEnabled = import.meta.env.VITE_ENABLE_DEMO_DATA === "true";
+
 const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
   PENDING_OWNER_CONFIRMATION: "todo", TODO: "todo", IN_PROGRESS: "progress",
   WAITING_EXTERNAL: "external", BLOCKED: "blocked", WAITING_HUMAN_CONFIRMATION: "confirm",
@@ -326,6 +328,11 @@ const extractionBatches: Record<ExtractionSource, ExtractionBatch> = {
       { id: "ext-c-3", title: "补充移动端个人任务通知规则", owner: "顾一健", reviewer: "曹玉祥", due: "8月22日", confidence: 86, status: "待负责人确认", deliverable: "移动端通知状态说明" },
     ],
   },
+};
+
+const visibleExtractionBatches: Record<ExtractionSource, ExtractionBatch> = demoDataEnabled ? extractionBatches : {
+  meeting: {...extractionBatches.meeting, title:"尚未导入会议", context:"等待连接真实会议来源", summary:"暂无会议候选任务。", projectId:"", project:"", tasks:[]},
+  chat: {...extractionBatches.chat, title:"尚未导入聊天", context:"等待连接真实聊天来源", summary:"暂无聊天候选任务。", projectId:"", project:"", tasks:[]},
 };
 
 const initialKnowledgePages: KnowledgePage[] = [
@@ -564,17 +571,17 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
-  const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
-  const [helps, setHelps] = useState<HelpRequest[]>(initialHelpRequests);
-  const [assets, setAssets] = useState<Asset[]>(initialAssets);
-  const [knowledgePages, setKnowledgePages] = useState<KnowledgePage[]>(initialKnowledgePages);
-  const [notifications, setNotifications] = useState<HubNotification[]>(initialNotifications);
+  const [candidates, setCandidates] = useState<Candidate[]>(demoDataEnabled ? initialCandidates : []);
+  const [helps, setHelps] = useState<HelpRequest[]>(demoDataEnabled ? initialHelpRequests : []);
+  const [assets, setAssets] = useState<Asset[]>(demoDataEnabled ? initialAssets : []);
+  const [knowledgePages, setKnowledgePages] = useState<KnowledgePage[]>(demoDataEnabled ? initialKnowledgePages : []);
+  const [notifications, setNotifications] = useState<HubNotification[]>(demoDataEnabled ? initialNotifications : []);
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
-  const [contributions, setContributions] = useState<string[]>([
+  const [contributions, setContributions] = useState<string[]>(demoDataEnabled ? [
     "完成任务「品牌视觉规范初稿」 · +8",
     "解决求助「GEO 问题库结构」 · +5",
     "沉淀知识「等待外部任务处理 SOP」 · +3",
-  ]);
+  ] : []);
   const [activeTeamId, setActiveTeamId] = useState(() => {
     const savedTeamId = window.localStorage.getItem("quanyi-active-team");
     return savedTeamId || "";
@@ -891,10 +898,10 @@ function Dashboard() {
     .filter((task) => task.id !== primaryPersonalTask?.id)
     .sort((a, b) => (["blocked", "review", "confirm", "progress", "ai"].indexOf(a.status) - ["blocked", "review", "confirm", "progress", "ai"].indexOf(b.status)))
     .slice(0, 3);
-  const pendingAssignments = Object.values(extractionBatches)
+  const pendingAssignments = Object.values(visibleExtractionBatches)
     .flatMap((batch) => batch.tasks)
     .filter((task) => task.owner === currentUser && task.status === "待负责人确认");
-  const pendingDistributionCount = Object.values(extractionBatches)
+  const pendingDistributionCount = Object.values(visibleExtractionBatches)
     .flatMap((batch) => batch.tasks)
     .filter((task) => task.status === "待负责人确认").length;
   const managerDecisions = tasks
@@ -914,12 +921,12 @@ function Dashboard() {
   const receiverMetrics = [
     { label: "未完成", value: personalTasks.length, note: "我的全部进行中任务", icon: ListChecks, tone: "blue", action: () => navigate("/tasks") },
     { label: "今天", value: todayTasks.length, note: "今天必须完成", icon: Clock3, tone: "violet", action: () => { setTodayOpen(true); setAssignedOpen(false); setExtractionOpen(null); } },
-    { label: "逾期", value: 0, note: "目前没有逾期任务", icon: AlertCircle, tone: "green", action: () => openPreview({ eyebrow: "任务状态", title: "目前没有逾期任务", description: "你的任务都在计划时间内。下一项最近截止任务是「梳理凡诺官网首页信息架构」 · 今天 18:00。", primaryLabel: "查看全部任务", primaryRoute: "/tasks" }) },
+    { label: "逾期", value: 0, note: "目前没有逾期任务", icon: AlertCircle, tone: "green", action: () => openPreview({ eyebrow: "任务状态", title: "目前没有逾期任务", description: personalTasks.length ? "当前没有识别到逾期任务，请在任务池继续查看全部工作。" : "当前还没有分配给你的任务。", primaryLabel: "查看全部任务", primaryRoute: "/tasks" }) },
     { label: "待接收", value: pendingAssignments.length, note: "确认后进入任务池", icon: Inbox, tone: "cyan", action: () => { setAssignedSource(null); setAssignedOpen(true); setExtractionOpen(null); } },
   ];
   const dispatcherMetrics = [
     { label: "待我决策", value: managerDecisions.length, note: "不处理将影响团队推进", icon: Target, tone: "blue", action: () => navigate("/tasks?focus=decisions") },
-    { label: "逾期 / 临期", value: 2, note: "今天需要跟进", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
+    { label: "逾期 / 临期", value: todayTasks.length, note: todayTasks.length ? "今天需要跟进" : "当前没有临期任务", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
     { label: "阻塞 / 求助", value: tasks.filter((task) => ["blocked", "external"].includes(task.status)).length, note: "需要协调资源或方向", icon: AlertCircle, tone: "red", action: () => navigate("/help") },
     { label: "待分配", value: pendingDistributionCount, note: "来自会议与聊天", icon: Inbox, tone: "violet", action: () => openExtraction("meeting") },
   ];
@@ -930,7 +937,7 @@ function Dashboard() {
       setAssignedSource(requestedAssignedSource);
       setAssignedOpen(true);
       setExtractionOpen(null);
-    } else if (requestedExtraction && extractionBatches[requestedExtraction]) {
+    } else if (requestedExtraction && visibleExtractionBatches[requestedExtraction]) {
       setExtractionOpen(requestedExtraction);
     }
   }, [requestedAssigned, requestedAssignedSource, requestedExtraction]);
@@ -984,7 +991,7 @@ function Dashboard() {
       <div className={"dashboard-screen dashboard-view-" + dashboardView}>
         <PageHeader
           eyebrow={dashboardView === "ceo" ? "CEO · 任务分配者" : "AI 产品经理 · 团队成员"}
-          title={dashboardView === "ceo" ? "早上好，徐泉" : "早上好，婉琛"}
+          title={`早上好，${user.name}`}
           description={dashboardView === "ceo" ? "先处理影响团队继续推进的决策，再关注异常和待分发任务。" : "先完成今天必须推进的任务，再处理新分配与协作事项。"}
           action={
             <div className="dashboard-header-actions">
@@ -1059,7 +1066,7 @@ function Dashboard() {
                 <button className="text-button" onClick={() => {setAssignedSource(null); setAssignedOpen(true); setExtractionOpen(null);}}>查看全部 <ArrowRight size={14}/></button>
               </div>
               <div className="dispatcher-extraction-grid member-extraction-grid">
-                {(["meeting", "chat"] as const).map((source) => {const assigned = extractionBatches[source].tasks.filter((task) => task.owner === currentUser && task.status === "待负责人确认"); return <button key={source} onClick={() => {setAssignedSource(source); setAssignedOpen(true); setExtractionOpen(null);}}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {assigned.length} 项</strong><small>待我确认</small></span><ChevronRight size={14}/></button>;})}
+                {(["meeting", "chat"] as const).map((source) => {const assigned = visibleExtractionBatches[source].tasks.filter((task) => task.owner === currentUser && task.status === "待负责人确认"); return <button key={source} onClick={() => {setAssignedSource(source); setAssignedOpen(true); setExtractionOpen(null);}}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {assigned.length} 项</strong><small>待我确认</small></span><ChevronRight size={14}/></button>;})}
               </div>
             </section>
             {assistantCard}
@@ -1105,7 +1112,7 @@ function Dashboard() {
                 <button className="text-button" onClick={() => openExtraction("meeting")}>查看全部 <ArrowRight size={14}/></button>
               </div>
               <div className="dispatcher-extraction-grid">
-                {(["meeting", "chat"] as const).map((source) => {const batch = extractionBatches[source]; const pending = batch.tasks.filter((task) => task.status === "待负责人确认").length; return <button key={source} onClick={() => openExtraction(source)}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {batch.tasks.length} 项</strong><small>待分发 {pending}</small></span><ChevronRight size={14}/></button>;})}
+                {(["meeting", "chat"] as const).map((source) => {const batch = visibleExtractionBatches[source]; const pending = batch.tasks.filter((task) => task.status === "待负责人确认").length; return <button key={source} onClick={() => openExtraction(source)}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {batch.tasks.length} 项</strong><small>待分发 {pending}</small></span><ChevronRight size={14}/></button>;})}
               </div>
             </section>
             {assistantCard}
@@ -1635,7 +1642,7 @@ function TaskPool() {
       )}
       {tab === "开放任务" && (
         <div className="open-task-grid">
-          {openTasks.map((task) => (
+          {(demoDataEnabled ? openTasks : []).map((task) => (
             <article className="open-task-card" key={task.id}>
               <div><StatusPill status="todo"/><span className="points-tag">+8 贡献分</span></div>
               <h3>{task.title}</h3><p>{task.description}</p>
@@ -2872,8 +2879,8 @@ function TaskExtractionReview({ initialSource, onClose }: { initialSource: Extra
 function LegacyTaskExtractionReview({ initialSource, onClose }: { initialSource: ExtractionSource; onClose: () => void }) {
   const { setTasks, notify, addNotification, projects, openPreview } = useHub();
   const [source, setSource] = useState<ExtractionSource>(initialSource);
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => Object.values(extractionBatches).flatMap((batch) => batch.tasks.filter((task) => task.status !== "已确认").map((task) => task.id)));
-  const batch = extractionBatches[source];
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => Object.values(visibleExtractionBatches).flatMap((batch) => batch.tasks.filter((task) => task.status !== "已确认").map((task) => task.id)));
+  const batch = visibleExtractionBatches[source];
   const selectedVisibleTasks = batch.tasks.filter((task) => selectedIds.includes(task.id) && task.status !== "已确认");
 
   const toggleTask = (task: ExtractedTask) => {
@@ -2893,7 +2900,7 @@ function LegacyTaskExtractionReview({ initialSource, onClose }: { initialSource:
 
   return (
     <AppModal title="AI 提取批次详情" subtitle="组织者视角：审核一次会议或聊天提取出的全部任务，再统一分发给负责人" onClose={onClose} size="xl">
-      <div className="extraction-source-tabs">{(["meeting", "chat"] as const).map((item) => <button className={source === item ? "active" : ""} key={item} onClick={() => setSource(item)}>{item === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}<span><strong>{extractionBatches[item].sourceLabel}</strong><small>{extractionBatches[item].tasks.length} 项任务</small></span></button>)}</div>
+      <div className="extraction-source-tabs">{(["meeting", "chat"] as const).map((item) => <button className={source === item ? "active" : ""} key={item} onClick={() => setSource(item)}>{item === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}<span><strong>{visibleExtractionBatches[item].sourceLabel}</strong><small>{visibleExtractionBatches[item].tasks.length} 项任务</small></span></button>)}</div>
 
       <section className="extraction-summary">
         <span className={"extraction-source-icon large " + source}>{source === "meeting" ? <MessageSquareText size={20}/> : <Users size={20}/>}</span>
@@ -2919,7 +2926,7 @@ function MyAssignedTasksReview({ initialSource, onClose }: { initialSource: Extr
   const teamMembers = useActiveTeamMemberProfiles().map((member) => member.name);
   const [filter, setFilter] = useState<"all" | ExtractionSource>(initialSource || "all");
   const assignedItems = (["meeting", "chat"] as const).flatMap((source) => {
-    const batch = extractionBatches[source];
+    const batch = visibleExtractionBatches[source];
     return batch.tasks.filter((task) => task.owner === user.name && task.status !== "已确认").map((task) => ({ source, batch, task }));
   });
   const visibleItems = filter === "all" ? assignedItems : assignedItems.filter((item) => item.source === filter);
