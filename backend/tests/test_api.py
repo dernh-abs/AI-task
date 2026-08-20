@@ -16,7 +16,15 @@ from app.main import app
 from app.database import engine
 from app.external_reminders import reminder_level, scan_external_reminders
 from app.models import Project, Team, User
+from sqlalchemy import event
 from sqlmodel import Session
+
+
+@event.listens_for(engine, "connect")
+def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 def cleanup_test_database() -> None:
@@ -290,6 +298,7 @@ def test_global_ceo_role_does_not_cross_team_boundary() -> None:
         observer = session.get(User, "u-observer")
         assert observer is not None
         session.add(Team(id="team-isolated", name="隔离团队"))
+        session.flush()
         session.add(Project(id="project-isolated", team_id="team-isolated", name="隔离项目", client="内部", objective="权限隔离", owner_id=observer.id))
         session.commit()
 

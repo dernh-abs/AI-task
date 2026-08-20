@@ -37,6 +37,9 @@ def confirm_candidate(session: Session, candidate: CandidateTask, actor: User, e
             raise DomainError(422, "PROJECT_MEMBER_REQUIRED", "Owner and reviewer must belong to the project")
     task = Task(id=f"task-{uuid4().hex}", project_id=project.id, title=candidate.title, description=candidate.description, deliverable=candidate.deliverable, acceptance=candidate.deliverable, owner_id=candidate.owner_id, reviewer_id=candidate.reviewer_id, status=TaskStatus.TODO if candidate.owner_id == actor.id else TaskStatus.PENDING_OWNER_CONFIRMATION, execution_mode=ExecutionMode.HUMAN, priority="MEDIUM", progress=0, due_at=candidate.due_at, source=f"候选提取 · {candidate.source_snapshot_id}")
     session.add(task)
+    # CandidateTask.created_task_id references this row. Persist it first so
+    # databases with enforced foreign keys do not update the candidate early.
+    session.flush()
     candidate.status = CandidateStatus.CREATED
     candidate.created_task_id = task.id
     candidate.confirmed_by = actor.id

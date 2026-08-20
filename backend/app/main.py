@@ -325,6 +325,9 @@ def create_candidate_extraction(payload: CandidateExtractionRequest, user: User 
         raise HTTPException(status_code=422, detail={"code": "AI_SCHEMA_INVALID", "message": "AI output did not match the candidate schema; no candidates were created"}) from exc
     snapshot = SourceSnapshot(id=f"src-{uuid4().hex}", project_id=project.id, source_type=payload.source_type, title=payload.title, content=payload.content, content_hash=hashlib.sha256(payload.content.encode()).hexdigest(), created_by=user.id, extraction_version="candidate-extract-v1")
     session.add(snapshot)
+    # CandidateTask references this row. Flush explicitly so PostgreSQL never
+    # attempts candidate inserts before the immutable source snapshot exists.
+    session.flush()
     candidates: list[CandidateTask] = []
     for extracted in gateway.data.candidates:
         candidate = CandidateTask(id=f"cand-{uuid4().hex}", source_snapshot_id=snapshot.id, project_id=project.id, title=extracted.title, description=extracted.description, deliverable=extracted.deliverable, owner_id=extracted.owner_id or user.id, reviewer_id=extracted.reviewer_id or project.owner_id, due_at=extracted.due_at, confidence=extracted.confidence, evidence=extracted.evidence)
