@@ -107,7 +107,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
 const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
-const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
+const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), dueAt:item.due_at, priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
   tasks: Task[];
@@ -884,8 +884,15 @@ function Dashboard() {
   const personalTasks = tasks
     .filter((task) => task.owner === currentUser || task.collaborators.includes(currentUser))
     .filter((task) => !["done", "external"].includes(task.status));
-  const primaryPersonalTask = personalTasks.find((task) => task.id === "t-101") || personalTasks[0];
-  const todayTasks = personalTasks.filter((task) => task.due.includes("今天"));
+  const primaryPersonalTask = personalTasks[0];
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart); tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const imminentEnd = new Date(todayStart); imminentEnd.setDate(imminentEnd.getDate() + 4);
+  const dueDate = (task: Task) => task.dueAt ? new Date(task.dueAt) : null;
+  const todayTasks = personalTasks.filter((task) => { const due = dueDate(task); return due && due >= todayStart && due < tomorrowStart; });
+  const overdueTasks = personalTasks.filter((task) => { const due = dueDate(task); return due && due < todayStart; });
+  const deadlineRiskTasks = tasks.filter((task) => !["done", "external"].includes(task.status)).filter((task) => { const due = dueDate(task); return due && due < imminentEnd; });
   const remainingPersonalTasks = personalTasks
     .filter((task) => task.id !== primaryPersonalTask?.id)
     .sort((a, b) => (["blocked", "review", "confirm", "progress", "ai"].indexOf(a.status) - ["blocked", "review", "confirm", "progress", "ai"].indexOf(b.status)))
@@ -909,12 +916,12 @@ function Dashboard() {
   const receiverMetrics = [
     { label: "未完成", value: personalTasks.length, note: "我的全部进行中任务", icon: ListChecks, tone: "blue", action: () => navigate("/tasks") },
     { label: "今天", value: todayTasks.length, note: "今天必须完成", icon: Clock3, tone: "violet", action: () => { setTodayOpen(true); setExtractionOpen(null); } },
-    { label: "逾期", value: 0, note: "目前没有逾期任务", icon: AlertCircle, tone: "green", action: () => openPreview({ eyebrow: "任务状态", title: "目前没有逾期任务", description: personalTasks.length ? "当前没有识别到逾期任务，请在任务池继续查看全部工作。" : "当前还没有分配给你的任务。", primaryLabel: "查看全部任务", primaryRoute: "/tasks" }) },
+    { label: "逾期", value: overdueTasks.length, note: overdueTasks.length ? "需要尽快处理" : "目前没有逾期任务", icon: AlertCircle, tone: overdueTasks.length ? "red" : "green", action: () => navigate("/tasks") },
     { label: "候选待处理", value: pendingAssignments.length, note: "由项目管理员审核创建", icon: Inbox, tone: "cyan", action: () => navigate("/tasks?tab=candidates") },
   ];
   const dispatcherMetrics = [
     { label: "待我决策", value: managerDecisions.length, note: "不处理将影响团队推进", icon: Target, tone: "blue", action: () => navigate("/tasks?focus=decisions") },
-    { label: "逾期 / 临期", value: todayTasks.length, note: todayTasks.length ? "今天需要跟进" : "当前没有临期任务", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
+    { label: "逾期 / 临期", value: deadlineRiskTasks.length, note: deadlineRiskTasks.length ? "未来三天内需要跟进" : "当前没有临期任务", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
     { label: "阻塞 / 求助", value: tasks.filter((task) => ["blocked", "external"].includes(task.status)).length, note: "需要协调资源或方向", icon: AlertCircle, tone: "red", action: () => navigate("/help") },
     { label: "待分配", value: pendingDistributionCount, note: "服务端候选任务", icon: Inbox, tone: "violet", action: () => navigate("/tasks?tab=candidates") },
   ];
@@ -960,8 +967,8 @@ function Dashboard() {
     <>
       <div className={"dashboard-screen dashboard-view-" + dashboardView}>
         <PageHeader
-          eyebrow={dashboardView === "ceo" ? "CEO · 任务分配者" : "AI 产品经理 · 团队成员"}
-          title={`早上好，${user.name}`}
+          eyebrow={dashboardView === "ceo" ? "CEO · 任务分配者" : "团队成员"}
+          title={`${now.getHours() < 12 ? "早上好" : now.getHours() < 18 ? "下午好" : "晚上好"}，${user.name}`}
           description={dashboardView === "ceo" ? "先处理影响团队继续推进的决策，再关注异常和待分发任务。" : "先完成今天必须推进的任务，再处理新分配与协作事项。"}
           action={
             <div className="dashboard-header-actions">
@@ -1202,7 +1209,7 @@ function CreateProject({ onClose, onCreate }: { onClose: () => void; onCreate: (
     event.preventDefault();
     if (!form.name.trim() || !form.client.trim()) return;
     setBusy(true);setError("");
-    try {const created=await createProject({name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,next_milestone:form.milestone,due_at:null});onCreate(projectFromApi(created,0));}
+    try {const created=await createProject({name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,next_milestone:form.milestone,due_at:form.due ? new Date(`${form.due}T23:59:59`).toISOString() : null});onCreate(projectFromApi(created,0));}
     catch(reason){setError(reason instanceof ApiError?reason.message:"项目创建失败");}
     finally{setBusy(false);}
   };
@@ -1210,8 +1217,8 @@ function CreateProject({ onClose, onCreate }: { onClose: () => void; onCreate: (
     <form className="form-stack" onSubmit={submit}>
       <label><span>项目名称 *</span><input autoFocus value={form.name} onChange={(event) => setForm({...form,name:event.target.value})} placeholder="例如：客户官网升级"/></label>
       <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人</span><input value={form.owner} disabled /></label></div>
-      <div className="form-grid"><label><span>目标日期</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>第一个里程碑</span><input value={form.milestone} onChange={(event) => setForm({...form,milestone:event.target.value})}/></label></div>
-      <div className="ai-form-tip"><Sparkles size={17}/><span>创建后 AI 会根据项目目标建议第一批任务，但不会直接分发。</span></div>
+      <div className="form-grid"><label><span>目标日期</span><input type="date" value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>第一个里程碑</span><input value={form.milestone} onChange={(event) => setForm({...form,milestone:event.target.value})}/></label></div>
+      <div className="ai-form-tip"><Sparkles size={17}/><span>创建后可进入项目空间补充阶段和任务；所有正式任务仍需人工创建或确认。</span></div>
       {error&&<p className="login-error">{error}</p>}
       <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim() || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
     </form>
@@ -1295,8 +1302,8 @@ function ProjectSpace() {
           <aside className="project-overview-side">
             <section className="panel risk-card">
               <div className="panel-title-row"><h2>风险与依赖</h2><AlertCircle size={18}/></div>
-              <div className="risk-item amber"><strong>首页卖点仍待客户确认</strong><span>可能影响方案深化节点</span><button onClick={() => navigate("/help")}>发起协作</button></div>
-              <div className="risk-item muted"><strong>等待产品参数表</strong><span>预计明天收到客户反馈</span></div>
+              {projectTasks.filter((task) => ["blocked", "external"].includes(task.status)).map((task) => <div className={"risk-item " + (task.status === "blocked" ? "amber" : "muted")} key={task.id}><strong>{task.title}</strong><span>{task.status === "blocked" ? task.blockedReason || "任务已阻塞" : "正在等待外部依赖"}</span><button onClick={() => openTask(task)}>查看任务</button></div>)}
+              {!projectTasks.some((task) => ["blocked", "external"].includes(task.status)) && <p className="empty-inline">当前没有来自真实任务的风险或外部依赖。</p>}
             </section>
             <section className="panel">
               <div className="panel-title-row"><h2>最近资产</h2><button className="icon-button" onClick={() => setTab("资产")}><ChevronRight size={16}/></button></div>
@@ -1310,17 +1317,14 @@ function ProjectSpace() {
       {tab === "AI 协作" && <ProjectChat project={project} />}
       {tab === "资产" && (
         <section className="panel tab-panel">
-          <div className="panel-title-row"><div><h2>项目资产</h2><p>任务、会议、交付物和项目知识共享同一上下文。</p></div><button className="button primary" onClick={() => navigate("/knowledge?create=1&space=" + encodeURIComponent(project.client))}><FilePlus2 size={16}/> 新建页面</button></div>
+          <div className="panel-title-row"><div><h2>项目资产</h2><p>资产服务尚未接入，当前不会展示或创建本地演示数据。</p></div><button className="button primary" disabled title="项目资产写入尚未接入服务端"><FilePlus2 size={16}/> 暂未开放</button></div>
           <AssetTable assets={projectAssets.length ? projectAssets : assets.slice(0,3)} onSelect={openAsset} />
         </section>
       )}
       {tab === "会议" && (
         <section className="panel tab-panel">
-          <div className="panel-title-row"><div><h2>会议与行动项</h2><p>会议结束后先审核候选任务，再正式进入执行。</p></div><button className="button primary" onClick={() => openPreview({eyebrow:"会议记录",title:"开始记录项目会议",description:"会议开始后会持续生成转写，结束时提取结论、风险和候选任务。",items:[{title:"确认参会成员",detail:"默认加入项目成员，也可邀请外部参与者"},{title:"记录或上传会议",detail:"支持实时转写与会后上传"},{title:"人工审核行动项",detail:"审核后才会成为正式任务"}],note:"原始转写会作为会议资产保存在当前项目。",primaryLabel:"进入会议记录"})}><Plus size={16}/> 记录会议</button></div>
-          <div className="meeting-list">
-            <div><span className="meeting-icon"><MessageSquareText size={18}/></span><p><strong>项目周会 · 8月18日</strong><small>42 分钟 · 6 位参与者 · 提取 3 个行动项</small></p><StatusPill status="candidate"/><button className="button secondary compact" onClick={() => openPreview({eyebrow:"会议纪要",title:"项目周会 · 8月18日",description:"首页优先建立品牌可信度和 AI 官网能力认知；核心卖点需在周三前确认。",items:[{title:"整理客户对首页卖点的反馈",detail:"负责人：廖婉琛 · 待审核"},{title:"补充解决方案案例依据",detail:"负责人：廖婉琛 · 待审核"},{title:"确认移动端导航范围",detail:"负责人：曹玉祥 · 待审核"}],primaryLabel:"去审核候选任务",primaryRoute:"/tasks"})}>查看纪要</button></div>
-            <div><span className="meeting-icon muted"><MessageSquareText size={18}/></span><p><strong>需求访谈 · 8月12日</strong><small>58 分钟 · 已确认 5 个任务</small></p><StatusPill status="done"/><button className="button secondary compact" onClick={() => openPreview({eyebrow:"会议纪要",title:"需求访谈 · 8月12日",description:"访谈围绕用户角色、核心任务与资产协作方式展开。",items:[{title:"明确项目负责人与协作者边界"},{title:"区分知识页面和文件资产"},{title:"补齐 AI 执行的人工确认节点"}],note:"5 个行动项已审核并进入任务池。",primaryLabel:"查看相关任务",primaryRoute:"/tasks"})}>查看纪要</button></div>
-          </div>
+          <div className="panel-title-row"><div><h2>会议与行动项</h2><p>会议服务、纪要和行动项提取尚未接入后端。</p></div><button className="button primary" disabled title="项目会议尚未接入服务端"><Plus size={16}/> 暂未开放</button></div>
+          <div className="preview-boundary-note"><AlertCircle size={18}/><p><strong>项目会议暂未接入</strong><small>接入持久化、权限和候选任务审核接口后才会展示真实会议记录。</small></p></div>
         </section>
       )}
       {createTaskOpen && <CreateTask onClose={() => setCreateTaskOpen(false)} defaultProjectId={project.id} />}
@@ -2051,33 +2055,42 @@ function CreateSkill({ onClose, onCreate }: { onClose: () => void; onCreate: (sk
 }
 
 function ContributionPage() {
-  const { openPreview } = useHub();
+  const { tasks, openTask, openPreview } = useHub();
   const [period, setPeriod] = useState<"本月" | "本季度">("本月");
   const [contributions, setContributions] = useState<ApiContribution[]>([]);
   useEffect(()=>{fetchContributions().then(setContributions).catch(()=>setContributions([]));},[]);
   const totalPoints = contributions.reduce((sum,item)=>sum+item.points,0);
+  const periodStart = useMemo(() => {
+    const now = new Date();
+    return period === "本月"
+      ? new Date(now.getFullYear(), now.getMonth(), 1)
+      : new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+  }, [period]);
+  const visibleContributions = contributions.filter((item) => new Date(item.created_at) >= periodStart);
+  const openContributionDetails = () => openPreview({
+    eyebrow:"真实贡献明细",
+    title:`完成任务 · ${period}`,
+    description:`共记录 ${visibleContributions.length} 次由服务端写入的任务验收事件。`,
+    items:visibleContributions.map((item) => {
+      const task = tasks.find((candidate) => candidate.id === item.task_id);
+      return {title:task?.title || `任务 ${item.task_id}`,detail:`${new Date(item.created_at).toLocaleString("zh-CN")} · +${item.points} 分 · V${item.submission_version}`};
+    }),
+    note:"贡献只用于呈现协作事实，不直接绑定绩效。",
+  });
   return (
     <>
       <PageHeader title="我的贡献" description="让主动认领、解决问题和知识沉淀被看见，不与绩效直接绑定。" />
       <section className="contribution-hero">
-        <div><span className="contribution-medal"><Trophy size={28}/></span><p><small>真实贡献事件</small><strong>{totalPoints}</strong><em>分</em><span>{contributions.length} 次已验收任务入账</span></p></div>
-        <div className="contribution-sparkline"><svg viewBox="0 0 300 80"><path d="M0 68 C45 66 58 45 96 50 S150 24 184 36 S242 8 300 14"/><path className="fill" d="M0 68 C45 66 58 45 96 50 S150 24 184 36 S242 8 300 14 L300 80 L0 80Z"/></svg></div>
+        <div><span className="contribution-medal"><Trophy size={28}/></span><p><small>累计真实贡献事件</small><strong>{totalPoints}</strong><em>分</em><span>{contributions.length} 次已验收任务入账</span></p></div>
+        <div className="contribution-truth-note"><BarChart3 size={22}/><p><strong>趋势统计暂未接入</strong><small>不会用固定曲线代替真实时间序列。</small></p></div>
       </section>
       <div className="contribution-grid">
-        {[
-          { label: "完成任务", value: String(contributions.length), Icon: CheckCircle2, tone: "blue" },
-          { label: "解决求助", value: "6", Icon: HandHelping, tone: "green" },
-          { label: "知识沉淀", value: "4", Icon: FileText, tone: "violet" },
-          { label: "开放任务", value: "3", Icon: Target, tone: "orange" },
-        ].map(({ label, value, Icon, tone }) => <button key={label} onClick={() => openPreview({eyebrow:"贡献明细",title:label + " · " + period,description:"共记录 " + value + " 次真实发生的团队推进行为。",items:label === "完成任务" ? [{title:"品牌视觉规范初稿",detail:"今天 11:20 · +8"},{title:"移动端状态覆盖检查",detail:"8月17日 · +6"},{title:"官网信息架构评审",detail:"8月15日 · +5"}] : label === "解决求助" ? [{title:"GEO 问题库结构",detail:"昨天 16:42 · +5"},{title:"客户资料缺口推进",detail:"8月16日 · +4"}] : label === "知识沉淀" ? [{title:"等待外部任务处理 SOP",detail:"8月16日 · +3"},{title:"任务协作方式说明",detail:"8月14日 · +3"}] : [{title:"空态文案整理",detail:"开放任务 · 待认领"},{title:"移动端文字溢出检查",detail:"开放任务 · 待认领"}],note:"贡献只用于呈现协作与知识影响，不直接绑定绩效。",primaryLabel:label === "开放任务" ? "进入任务池" : "查看贡献记录",primaryRoute:label === "开放任务" ? "/tasks" : undefined})}><span className={"metric-icon " + tone}><Icon size={18}/></span><strong>{value}</strong><small>{label}</small><ChevronRight size={15}/></button>)}
+        <button onClick={openContributionDetails}><span className="metric-icon blue"><CheckCircle2 size={18}/></span><strong>{visibleContributions.length}</strong><small>完成任务 · {period}</small><ChevronRight size={15}/></button>
+        {[{label:"解决求助",Icon:HandHelping,tone:"green"},{label:"知识沉淀",Icon:FileText,tone:"violet"},{label:"开放任务",Icon:Target,tone:"orange"}].map(({label,Icon,tone}) => <button className="unavailable" disabled key={label} title={`${label}统计尚未接入服务端`}><span className={"metric-icon " + tone}><Icon size={18}/></span><strong>—</strong><small>{label} · 未接入</small></button>)}
       </div>
       <div className="contribution-layout">
-        <section className="panel"><div className="panel-title-row"><div><h2>贡献记录</h2><p>仅展示服务端在验收通过时写入的幂等事件。</p></div><button className="button secondary compact" onClick={() => setPeriod((value) => value === "本月" ? "本季度" : "本月")}>{period} <ChevronDown size={14}/></button></div><div className="timeline-list">{contributions.map((item) => <div key={item.id}><span className="timeline-dot"/><p><strong>任务验收通过 · +{item.points} 分</strong><small>{new Date(item.created_at).toLocaleString("zh-CN")} · 提交版本 V{item.submission_version}</small></p></div>)}{!contributions.length&&<p className="empty-inline">暂无真实贡献事件；任务验收通过后自动入账。</p>}</div></section>
-        <aside className="panel achievement-panel"><div className="panel-title-row"><h2>成就徽章</h2><span>4 / 8</span></div>{[
-          { name: "推进者", desc: "连续推动关键任务", Icon: Zap },
-          { name: "答疑伙伴", desc: "帮助同事解决问题", Icon: HandHelping },
-          { name: "知识共建", desc: "沉淀可复用知识", Icon: Library },
-        ].map(({ name, desc, Icon }) => <div className="achievement" key={name}><span><Icon size={18}/></span><p><strong>{name}</strong><small>{desc}</small></p><CheckCircle2 size={17}/></div>)}</aside>
+        <section className="panel"><div className="panel-title-row"><div><h2>贡献记录</h2><p>仅展示服务端在验收通过时写入的幂等事件。</p></div><button className="button secondary compact" onClick={() => setPeriod((value) => value === "本月" ? "本季度" : "本月")}>{period} <ChevronDown size={14}/></button></div><div className="timeline-list">{visibleContributions.map((item) => {const task=tasks.find((candidate)=>candidate.id===item.task_id);return <div key={item.id}><span className="timeline-dot"/><p><strong>{task?.title || "任务验收通过"} · +{item.points} 分</strong><small>{new Date(item.created_at).toLocaleString("zh-CN")} · 提交版本 V{item.submission_version}</small></p>{task&&<button className="text-button" onClick={()=>openTask(task)}>查看任务</button>}</div>;})}{!visibleContributions.length&&<p className="empty-inline">{period}暂无真实贡献事件；任务验收通过后自动入账。</p>}</div></section>
+        <aside className="panel achievement-panel"><div className="panel-title-row"><h2>成就徽章</h2><span>未接入</span></div><div className="preview-boundary-note"><AlertCircle size={18}/><p><strong>暂无真实徽章数据</strong><small>成就规则、事件来源和服务端记录完成后才会开放。</small></p></div></aside>
       </div>
     </>
   );
@@ -2314,19 +2327,7 @@ function LegacyAgentCenter() {
 }
 
 function AgentAccess() {
-  const { notify, openPreview } = useHub();
-  const [copied, setCopied] = useState(false);
-  const copy = () => { setCopied(true); notify("示例命令已复制"); window.setTimeout(() => setCopied(false), 1800); };
-  return (
-    <>
-      <PageHeader title="Agent 接入" description="让 Codex 和其他 Agent 查询、创建、更新任务，并提交结果等待人工确认。" action={<span className="connection-status"><i/> API 服务正常</span>} />
-      <div className="access-layout">
-        <section className="panel access-start"><span className="access-icon"><Code2 size={24}/></span><div><span className="section-kicker">CLI / API</span><h2>把 AI 变成系统里的真实使用者</h2><p>Agent 可以在权限范围内读取项目上下文、创建候选任务、更新执行状态和提交交付物。所有关键节点仍保留人工确认。</p></div><div className="code-block"><header><span>Codex CLI</span><button onClick={copy}>{copied ? <Check size={15}/> : <Code2 size={15}/>} {copied ? "已复制" : "复制"}</button></header><pre>codex task create --project p-quanyi{"\n"}  --title "检查移动端状态覆盖"{"\n"}  --mode hybrid --confirm</pre></div></section>
-        <aside className="panel permission-card"><h2>权限原则</h2>{[["查询项目与任务","允许"],["创建候选任务","允许"],["更新执行状态","允许"],["直接完成业务任务","需人工确认"]].map(([name,status]) => <div key={name}><span>{name}</span><strong className={status.includes("人工") ? "warning" : ""}>{status}</strong></div>)}</aside>
-      </div>
-      <section className="panel api-table-panel"><div className="panel-title-row"><div><h2>基础接口</h2><p>第一版只展示核心工作闭环所需能力。</p></div><button className="button secondary compact" onClick={() => openPreview({eyebrow:"开发文档",title:"Agent API 接入说明",description:"接口按读取、候选创建、状态更新和人工确认四类能力组织。",items:[{title:"1. 获取访问凭证",detail:"按成员权限生成短期 Token"},{title:"2. 读取项目上下文",detail:"只能读取调用者有权访问的范围"},{title:"3. 创建候选或提交结果",detail:"关键动作进入人工确认"},{title:"4. 监听状态回调",detail:"处理成功、失败与重试结果"}],note:"示例请求、字段和错误码会由研发文档统一维护。",primaryLabel:"复制接入示例"})}>查看 API 文档 <ArrowRight size={15}/></button></div><div className="api-list">{[["POST","/tasks/candidates","创建候选任务"],["PATCH","/tasks/:id/status","更新任务状态"],["POST","/runs/:id/result","提交 AI 执行结果"],["POST","/confirmations","请求人工确认"],["GET","/projects/:id/context","读取项目上下文"]].map(([method,path,desc]) => <button key={path} onClick={() => openPreview({eyebrow:"接口详情",title:method + " " + path,description:desc,items:[{title:"权限校验",detail:"继承当前成员与项目权限"},{title:"请求结果",detail:method === "GET" ? "返回结构化项目上下文" : "返回操作记录与下一状态"},{title:"异常恢复",detail:"重复请求使用幂等键，失败可安全重试"}],note:"关键写入操作会生成审计记录。"})}><span className={"method " + method.toLowerCase()}>{method}</span><code>{path}</code><span>{desc}</span><ChevronRight size={15}/></button>)}</div></section>
-    </>
-  );
+  return <PreviewOnlyPage title="Agent 接入" description="当前尚未提供稳定的外部 Agent 凭证、CLI 和公开接口契约。" items={["确定访问凭证与项目权限模型","发布与真实后端一致的 API 契约","补齐幂等、审计和人工确认测试"]}/>;
 }
 
 function AiChat() {
@@ -2539,7 +2540,7 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
     if (!form.title.trim()) return;
     setBusy(true);
     try {
-      const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:form.ownerId,reviewer_id:form.reviewerId,execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:null});
+      const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:form.ownerId,reviewer_id:form.reviewerId,execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:form.due ? new Date(form.due).toISOString() : null});
       setTasks((items) => [taskFromApi(created), ...items]);
       notify("任务已真实创建并加入任务池");
       onClose();
@@ -2554,7 +2555,7 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
         <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><select value={form.ownerId} onChange={(event) => setForm({...form,ownerId:event.target.value})}>{members.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
         <div className="form-grid"><label><span>交付给 / 验收人</span><select value={form.reviewerId} onChange={(event) => setForm({...form,reviewerId:event.target.value})}>{members.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}</select></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
         {memberError && <p className="login-error">{memberError}</p>}
-        <div className="form-grid"><label><span>截止时间</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI</option><option value="hybrid">人机协作</option></select></label></div>
+        <div className="form-grid"><label><span>截止时间</span><input type="datetime-local" value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI</option><option value="hybrid">人机协作</option></select></label></div>
         <div className="ai-form-tip"><Sparkles size={17}/><span>任务创建后可在详情页生成 AI 草稿；草稿必须人工确认，不会自动完成任务。</span></div>
         <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()||!form.projectId||!form.ownerId||!form.reviewerId||busy}>{busy?"创建中…":"创建任务"}</button></footer>
       </form>
@@ -2645,7 +2646,7 @@ function TaskDetailPage() {
   }, [taskId]);
   if (!task) return <EmptyState icon={<ListTodo/>} title="没有找到这个任务" description="任务可能已被归档或删除。" action={<button className="button primary" onClick={() => navigate("/tasks")}>返回任务池</button>} />;
   const currentUser = user.name;
-  const reviewer = task.reviewer || "徐泉";
+  const reviewer = task.reviewer || "未设置";
   const isTaskOwner = task.owner === currentUser;
   const isReviewer = reviewer === currentUser;
   const replaceTask = (apiTask: ApiTask) => {
@@ -2740,7 +2741,7 @@ function TaskDetailPage() {
           <div><span><NavLink to="/tasks">任务池</NavLink><ChevronRight size={13}/>{task.project}</span><h1>{task.title}</h1></div>
           <div className="task-detail-header-actions">
             {(task.apiStatus === "TODO" || task.apiStatus === "IN_PROGRESS") && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setExternalOpen(true)}><Clock3 size={16}/> 等待外部</button>}
-            {task.apiStatus === "IN_PROGRESS" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={startAiAssistance}>{aiBusy ? <Activity size={16}/> : <Sparkles size={16}/>} {aiBusy ? "Ollama 正在生成…（首次可能约 2 分钟）" : "AI 协助生成草稿"}</button>}
+            {task.apiStatus === "IN_PROGRESS" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={startAiAssistance}>{aiBusy ? <Activity size={16}/> : <Sparkles size={16}/>} {aiBusy ? "AI 正在生成…" : "AI 协助生成草稿"}</button>}
             {task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && isTaskOwner && <button className="button secondary" disabled={actionBusy} onClick={() => setAiRevisionOpen(true)}><ArrowLeft size={16}/> 要求 AI 重做</button>}
             {task.apiStatus === "WAITING_REVIEW" && isReviewer && <button className="button secondary" disabled={actionBusy} onClick={() => setReturnOpen(true)}><ArrowLeft size={16}/> 退回修改</button>}
             <button disabled={actionDisabled} className={"button primary " + (actionDisabled ? "disabled" : "")} onClick={action}>{task.status === "ai" ? <Activity size={16}/> : task.status === "review" && isTaskOwner ? <Bell size={16}/> : <ArrowRight size={16}/>} {actionLabel}</button>

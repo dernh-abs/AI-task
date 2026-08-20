@@ -4981,6 +4981,50 @@ a:focus-visible {
   stroke: none;
 }
 
+.contribution-truth-note {
+  display: flex;
+  width: min(320px, 40%);
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 12px;
+  background: rgba(255,255,255,.08);
+}
+
+.contribution-truth-note > svg { flex: 0 0 auto; color: #8fc0ff; }
+.contribution-truth-note p { display: flex; flex-direction: column; }
+.contribution-truth-note p strong { margin: 0; font-size: 14px; letter-spacing: 0; }
+.contribution-truth-note p small { margin-top: 4px; }
+
+.preview-boundary-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 13px 14px;
+  border: 1px solid #dbe5f5;
+  border-radius: 11px;
+  background: #f5f8fd;
+  color: var(--hub-text);
+}
+
+.preview-boundary-note > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--hub-blue);
+}
+
+.preview-boundary-note p {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.preview-boundary-note strong { font-size: 14px; }
+.preview-boundary-note small { color: var(--hub-muted); font-size: 12px; line-height: 1.55; }
+
 .contribution-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -9828,11 +9872,13 @@ a:focus-visible {
   color: var(--hub-text);
   text-align: left;
 }
-.contribution-grid > button:hover { border-color: #c8d5ec; box-shadow: var(--hub-shadow-1); }
+.contribution-grid > button:not(:disabled):hover { border-color: #c8d5ec; box-shadow: var(--hub-shadow-1); }
+.contribution-grid > button.unavailable { cursor: not-allowed; opacity: .65; }
 .contribution-grid > button .metric-icon { grid-row: 1 / 3; }
 .contribution-grid > button > strong { font-size: 18px; }
 .contribution-grid > button > small { color: var(--hub-muted); font-size: 12px; }
 .contribution-grid > button > svg { grid-column: 3; grid-row: 1 / 3; color: var(--hub-subtle); }
+.timeline-list > div > .text-button { margin-left: auto; align-self: center; white-space: nowrap; }
 
 .api-list > button {
   display: grid;

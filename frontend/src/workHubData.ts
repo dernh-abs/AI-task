@@ -19,6 +19,7 @@ export type Task = {
   owner: string;
   collaborators: string[];
   due: string;
+  dueAt?: string | null;
   priority: "高" | "中" | "低";
   status: TaskStatus;
   mode: ExecutionMode;
