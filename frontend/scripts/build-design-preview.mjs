@@ -12,7 +12,14 @@ if (!scriptMatch || !styleMatch) {
   throw new Error("Unable to locate the built JavaScript or CSS assets.");
 }
 
-const resolveAsset = (assetPath) => new URL(assetPath.replace(/^\.\//, ""), distRoot);
+const configuredBase = (process.env.VITE_BASE_PATH || "/").replace(/^\/+|\/+$/g, "");
+const resolveAsset = (assetPath) => {
+  let relativePath = assetPath.replace(/^\.?\/+/, "");
+  if (configuredBase && relativePath.startsWith(`${configuredBase}/`)) {
+    relativePath = relativePath.slice(configuredBase.length + 1);
+  }
+  return new URL(relativePath, distRoot);
+};
 const [javascript, stylesheet] = await Promise.all([
   readFile(resolveAsset(scriptMatch[1]), "utf8"),
   readFile(resolveAsset(styleMatch[1]), "utf8"),

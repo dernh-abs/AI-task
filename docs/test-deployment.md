@@ -10,7 +10,7 @@
 
 - Linux 服务器；
 - Docker Engine 与 Docker Compose v2；
-- 安全组开放测试站点端口（默认 TCP 8080）；
+- 直接公网测试时，安全组需开放站点端口；通过宿主机 Nginx 代理时，容器端口应只绑定 `127.0.0.1`；
 - 服务器具备访问 GitHub 和容器镜像仓库的网络能力。
 
 ## 首次部署
@@ -48,12 +48,12 @@ docker compose --env-file .env.test -f compose.test.yml ps
 
 ```bash
 docker compose --env-file .env.test -f compose.test.yml logs --tail=100 backend
-curl --fail http://127.0.0.1:8080/api/health
+curl --fail http://127.0.0.1:3389/api/health
 ```
 
 健康响应中的 `database` 必须为 `postgresql`。
 
-默认使用 8080 是为了避免覆盖服务器上已有的 80/443 站点。只有在确认现有 Nginx 配置并完成备份后，才可通过反向代理绑定测试域名；不得让 Compose 直接抢占已有端口。
+示例使用 3389 是为了适配当前测试服务器的防火墙规则，且不得让 Compose 直接抢占已有的 80/443。域名反向代理验收完成后，设置 `APP_BIND_ADDRESS=127.0.0.1`，避免容器端口继续暴露到公网。
 
 ## 更新部署
 
@@ -94,3 +94,15 @@ docker compose --env-file .env.test -f compose.test.yml exec -T db \
 4. 完成一次候选提取和一次任务草稿，确认 UI 显示 `LIVE`。
 
 Mock 或 Fallback 结果不得作为 Ollama Live 验收通过的证据。
+
+## 挂载到现有域名子路径
+
+使用 `https://quanyigeo.com/ai-task/` 时，在 `.env.test` 中设置：
+
+```env
+APP_ORIGIN=https://quanyigeo.com
+APP_BASE_PATH=/ai-task/
+APP_API_BASE_URL=/ai-task/api
+```
+
+前端构建会同步设置 Vite 静态资源基址、React Router basename 和 API 前缀。宿主机 Nginx 必须将 `/ai-task/api/` 转发到容器的 `/api/`，并将其余 `/ai-task/` 请求去除前缀后转发到前端容器。不要覆盖现有站点的 `/` 或 `/api`。

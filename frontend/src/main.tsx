@@ -5,9 +5,11 @@ import AppV2 from "./AppV2";
 import { AuthProvider } from "./auth";
 import "./index.css";
 
+const routerBasePath = (import.meta.env.VITE_BASE_PATH || "/").replace(/\/+$/, "") || "/";
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasePath}>
       <AuthProvider><AppV2 /></AuthProvider>
     </BrowserRouter>
   </React.StrictMode>,
