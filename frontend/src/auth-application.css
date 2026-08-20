@@ -70,3 +70,50 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.active-session-warning {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid #f0cf93;
+  border-radius: 12px;
+  background: #fffaf0;
+}
+
+.active-session-warning > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.active-session-warning strong {
+  color: #8a4b08;
+  font-size: 14px;
+}
+
+.active-session-warning span {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.active-session-warning small {
+  color: #667085;
+  line-height: 1.55;
+}
+
+.active-session-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.auth-switch-account {
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: #246bfd;
+  font-weight: 700;
+  cursor: pointer;
+}

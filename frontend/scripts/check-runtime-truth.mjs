@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../src/AppV2.tsx", import.meta.url), "utf8");
+const authSource = readFileSync(new URL("../src/auth.tsx", import.meta.url), "utf8");
 
 function between(start, end) {
   const from = source.indexOf(start);
@@ -43,6 +44,10 @@ if (!personalAi.includes("个人 AI 助手 · 暂未开放") || !personalAi.incl
 
 for (const route of ["HelpCenter", "KnowledgeSpace", "AssetLibrary", "CapabilityLibrary"]) {
   requireText(`function ${route}(){return <PreviewOnlyPage`, `${route} 必须保持只读预览`);
+}
+
+if (!authSource.includes("if(inviteToken)return <ActivationPage") || !authSource.includes("currentUser={user}")) {
+  throw new Error("邀请链接必须优先于当前登录态，并显式确认账号切换");
 }
 
 console.log("运行时真实性检查通过：P0/P1 正式入口未重新接入已知演示写链路。");
