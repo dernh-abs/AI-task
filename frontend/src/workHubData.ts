@@ -53,6 +53,7 @@ export type Project = {
   client: string;
   stage: string;
   health: "正常" | "有风险" | "需关注";
+  healthReasons?: string[];
   progress: number;
   owner: string;
   nextMilestone: string;

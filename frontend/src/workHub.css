@@ -1575,16 +1575,23 @@ a:focus-visible {
   margin: 0;
 }
 
-.dashboard-screen .next-action-content { display: block; margin-top: 0; }
-.dashboard-screen .next-action-link { position: absolute; z-index: 2; top: 14px; right: 16px; }
-.dashboard-screen .next-action-summary { padding-right: 112px; }
+.dashboard-screen .next-action-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.dashboard-screen .next-action-card-header .next-action-eyebrow { min-width: 0; }
+.dashboard-screen .next-action-link { position: static; flex: none; }
+.dashboard-screen .next-action-content { display: block; margin-top: 8px; }
+.dashboard-screen .next-action-summary { min-width: 0; }
 .dashboard-screen .next-action-copy {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 18px;
 }
-.dashboard-screen .next-action-summary { min-width: 0; }
 .dashboard-screen .next-action-eyebrow {
   display: block;
   margin-bottom: 4px;
@@ -1614,6 +1621,26 @@ a:focus-visible {
 .dashboard-screen .task-inline-meta { margin-top: 8px; font-size: 12px; }
 .dashboard-screen .next-action-copy .button-row { flex-wrap: nowrap; margin-top: 0; }
 .dashboard-screen .next-action-copy .button { min-height: 38px; padding-right: 12px; padding-left: 12px; white-space: nowrap; }
+.dashboard-screen .next-action-empty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  margin-top: 6px;
+  color: #4c76c6;
+}
+.dashboard-screen .next-action-empty > span { display: grid; gap: 2px; min-width: 0; }
+.dashboard-screen .next-action-empty strong { color: var(--hub-text); font-size: 13px; }
+.dashboard-screen .next-action-empty small { color: var(--hub-muted); font-size: 12px; }
+
+@media (max-width: 1080px) {
+  .dashboard-screen .next-action-copy {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+  }
+  .dashboard-screen .next-action-copy .button-row { justify-content: flex-start; }
+}
 
 .dashboard-screen .focus-panel { overflow: hidden; }
 .dashboard-screen .focus-panel .panel-title-row { align-items: center; }
@@ -2399,6 +2426,51 @@ a:focus-visible {
   margin-bottom: 0;
   color: var(--hub-text);
   font-size: 15px;
+}
+
+.project-health-reason {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: #f4f6f9;
+  color: var(--hub-muted);
+  font-size: 12px;
+}
+
+.project-health-reason > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-health-reason > em {
+  font-style: normal;
+  font-weight: 750;
+}
+
+.project-health-reason.有风险 { background: #fff8e9; color: #94600e; }
+.project-health-reason.需关注 { background: #fff1f1; color: #ad353a; }
+.project-health-reason.正常 { background: #edf9f2; color: #187552; }
+
+.portfolio-health {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.portfolio-health > small {
+  overflow: hidden;
+  width: 100%;
+  color: var(--hub-subtle);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-next {

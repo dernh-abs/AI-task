@@ -106,7 +106,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 };
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
-const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
+const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, healthReasons:item.health_reasons, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
 const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), dueAt:item.due_at, priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
@@ -996,24 +996,33 @@ function Dashboard() {
         {dashboardView === "member" ? <>
           <div className="dashboard-main">
             <section className="panel next-action-card">
-              <button className="text-button next-action-link" onClick={() => navigate("/tasks")}>全部任务 <ArrowRight size={15} /></button>
-              <div className="next-action-content">
-                <div className="next-action-copy">
-                  <div className="next-action-summary">
-                    <span className="next-action-eyebrow">今天的第一件事</span>
-                    <h3>{primaryPersonalTask?.title}</h3>
-                    <p>{primaryPersonalTask?.description}</p>
-                    <div className="task-inline-meta">
-                      {primaryPersonalTask && <ModePill mode={primaryPersonalTask.mode} />}
-                      <span><BriefcaseBusiness size={14} /> {primaryPersonalTask?.project}</span>
-                      <span><Clock3 size={14} /> {primaryPersonalTask?.due}</span>
+              <header className="next-action-card-header">
+                <span className="next-action-eyebrow">今天的第一件事</span>
+                <button className="text-button next-action-link" onClick={() => navigate("/tasks")}>全部任务 <ArrowRight size={15} /></button>
+              </header>
+              {primaryPersonalTask ? (
+                <div className="next-action-content">
+                  <div className="next-action-copy">
+                    <div className="next-action-summary">
+                      <h3>{primaryPersonalTask.title}</h3>
+                      <p>{primaryPersonalTask.description}</p>
+                      <div className="task-inline-meta">
+                        <ModePill mode={primaryPersonalTask.mode} />
+                        <span><BriefcaseBusiness size={14} /> {primaryPersonalTask.project}</span>
+                        <span><Clock3 size={14} /> {primaryPersonalTask.due}</span>
+                      </div>
+                    </div>
+                    <div className="button-row">
+                      <button className="button primary" onClick={() => openTask(primaryPersonalTask)}>继续处理 <ArrowRight size={16} /></button>
                     </div>
                   </div>
-                  <div className="button-row">
-                    <button className="button primary" onClick={() => primaryPersonalTask && openTask(primaryPersonalTask)}>继续处理 <ArrowRight size={16} /></button>
-                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="next-action-empty">
+                  <CheckCircle2 size={18}/>
+                  <span><strong>当前没有待处理任务</strong><small>可以查看全部任务，或等待新的任务分配。</small></span>
+                </div>
+              )}
             </section>
 
             <section className="panel focus-panel">
@@ -1179,6 +1188,11 @@ function ProjectsPage() {
                 <span><strong>{projectTasks.length}</strong> 个任务</span>
                 <span><strong>{projectTasks.filter((task) => task.status === "blocked").length}</strong> 个阻塞</span>
               </div>
+              <div className={"project-health-reason " + project.health} title={(project.healthReasons || []).join("；")}>
+                <AlertCircle size={15}/>
+                <span>{project.healthReasons?.[0] || "当前暂无可解释的评级原因"}</span>
+                {(project.healthReasons?.length || 0) > 1 && <em>+{project.healthReasons!.length - 1}</em>}
+              </div>
               <div className="project-next">
                 <span><Target size={15} /> 下一里程碑</span>
                 <strong>{project.nextMilestone}</strong>
@@ -1193,7 +1207,7 @@ function ProjectsPage() {
         })}
       </div> : <section className="panel portfolio-view">
         <header><span>项目</span><span>健康度</span><span>当前阶段</span><span>下一里程碑</span><span>负责人</span><span>进度</span></header>
-        {filtered.map((project) => <button key={project.id} onClick={() => navigate("/projects/" + project.id)}><span><i style={{background:project.color}} /><strong>{project.name}</strong><small>{project.client}</small></span><span><em className={"health-pill " + project.health}>{project.health}</em></span><span>{project.stage}</span><span><strong>{project.nextMilestone}</strong><small>{project.due}</small></span><span><Avatar name={project.owner} size="sm"/>{project.owner}</span><span>{project.progress}%<ChevronRight size={15}/></span></button>)}
+        {filtered.map((project) => <button key={project.id} onClick={() => navigate("/projects/" + project.id)}><span><i style={{background:project.color}} /><strong>{project.name}</strong><small>{project.client}</small></span><span className="portfolio-health"><em className={"health-pill " + project.health}>{project.health}</em><small title={(project.healthReasons || []).join("；")}>{project.healthReasons?.[0]}</small></span><span>{project.stage}</span><span><strong>{project.nextMilestone}</strong><small>{project.due}</small></span><span><Avatar name={project.owner} size="sm"/>{project.owner}</span><span>{project.progress}%<ChevronRight size={15}/></span></button>)}
       </section>}
       {createOpen && <CreateProject onClose={() => setCreateOpen(false)} onCreate={(project) => { setProjects((items) => [project, ...items]); setCreateOpen(false); notify("项目已创建，已进入项目空间"); navigate("/projects/" + project.id); }} />}
     </>

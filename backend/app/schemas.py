@@ -181,6 +181,7 @@ class ProjectRead(ApiModel):
     due_at: datetime | None
     progress: int
     health: Literal["正常", "有风险", "需关注"]
+    health_reasons: list[str]
     current_stage: str
     stages: list[StageRead]
 

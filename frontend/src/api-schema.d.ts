@@ -1015,6 +1015,8 @@ export interface components {
              * @enum {string}
              */
             health: "正常" | "有风险" | "需关注";
+            /** Health Reasons */
+            health_reasons: string[];
             /** Current Stage */
             current_stage: string;
             /** Stages */

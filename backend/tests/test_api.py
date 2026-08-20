@@ -57,6 +57,7 @@ def test_login_and_read_projects() -> None:
         projects = client.get("/api/projects", headers=headers)
         assert projects.status_code == 200
         assert projects.json()[0]["name"] == "全意 AI 工作中枢"
+        assert projects.json()[0]["health_reasons"]
         tasks = client.get("/api/tasks", headers=headers)
         assert tasks.status_code == 200
         assert len(tasks.json()) >= 2

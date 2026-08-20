@@ -3114,6 +3114,13 @@
             ],
             "title": "Health"
           },
+          "health_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Health Reasons"
+          },
           "current_stage": {
             "type": "string",
             "title": "Current Stage"
@@ -3138,6 +3145,7 @@
           "due_at",
           "progress",
           "health",
+          "health_reasons",
           "current_stage",
           "stages"
         ],
