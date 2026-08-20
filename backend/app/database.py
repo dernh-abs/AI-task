@@ -9,7 +9,11 @@ from .config import load_settings
 
 settings = load_settings()
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+engine = create_engine(
+    settings.database_url,
+    connect_args=connect_args,
+    pool_pre_ping=not settings.database_url.startswith("sqlite"),
+)
 
 
 def create_schema() -> None:
@@ -19,4 +23,3 @@ def create_schema() -> None:
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
-

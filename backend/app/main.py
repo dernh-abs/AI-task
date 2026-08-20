@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlmodel import Session, select
 
 from .config import load_settings
@@ -59,7 +60,9 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), al
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    with Session(engine) as session:
+        session.exec(text("SELECT 1"))
+    return {"status": "ok", "database": engine.dialect.name}
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)

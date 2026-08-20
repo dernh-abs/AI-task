@@ -10,6 +10,15 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _database_url(value: str) -> str:
+    """Use psycopg 3 for PostgreSQL URLs, including provider-style postgres:// URLs."""
+    if value.startswith("postgres://"):
+        return "postgresql+psycopg://" + value.removeprefix("postgres://")
+    if value.startswith("postgresql://"):
+        return "postgresql+psycopg://" + value.removeprefix("postgresql://")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -30,7 +39,7 @@ class Settings:
 def load_settings() -> Settings:
     origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     return Settings(
-        database_url=os.getenv("DATABASE_URL", "sqlite:///./quanyi_mvp.db"),
+        database_url=_database_url(os.getenv("DATABASE_URL", "sqlite:///./quanyi_mvp.db")),
         jwt_secret=os.getenv("JWT_SECRET", "local-development-secret-change-me"),
         jwt_expire_minutes=int(os.getenv("JWT_EXPIRE_MINUTES", "480")),
         cors_origins=tuple(item.strip() for item in origins.split(",") if item.strip()),

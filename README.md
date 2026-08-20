@@ -97,6 +97,12 @@ $env:OLLAMA_MODEL="qwen2.5:7b"
 
 若 `ollama` 未加入 PATH，可直接运行 `%LOCALAPPDATA%\Programs\Ollama\ollama.exe`。后端通过 HTTP 接口连接 Ollama，命令行是否在 PATH 中不影响已启动服务的模型调用。
 
+## PostgreSQL 测试环境部署
+
+仓库提供 `compose.test.yml`，使用 PostgreSQL 16、FastAPI 和 Nginx 构建同源测试环境。真实数据库密码和 JWT 密钥只保存在服务器端 `.env.test`，不得提交 Git。
+
+完整步骤见 [`docs/test-deployment.md`](docs/test-deployment.md)。
+
 演示账号：
 
 - 任务成员：`member@quanyi.local` / `mvp-member-2026`

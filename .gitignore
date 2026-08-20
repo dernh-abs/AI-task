@@ -9,6 +9,7 @@ backend/*.db
 .env
 .env.*
 !.env.example
+!.env.test.example
 *.pyc
 *.log
 .workbuddy/
