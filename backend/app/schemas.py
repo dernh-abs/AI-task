@@ -20,8 +20,23 @@ class ApiModel(BaseModel):
 
 
 class LoginRequest(ApiModel):
-    email: str
-    password: str
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=72)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_login_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized:
+            raise ValueError("请输入有效邮箱")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def login_password_length(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("密码编码后不能超过 72 字节")
+        return value
 
 
 class UserRead(ApiModel):
@@ -36,6 +51,25 @@ class TokenResponse(ApiModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
+
+
+class ChangePasswordRequest(ApiModel):
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=10, max_length=72)
+
+    @field_validator("current_password", "new_password")
+    @classmethod
+    def bcrypt_length(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("密码编码后不能超过 72 字节")
+        return value
+
+    @field_validator("new_password")
+    @classmethod
+    def strong_new_password(cls, value: str) -> str:
+        if not any(character.isalpha() for character in value) or not any(character.isdigit() for character in value):
+            raise ValueError("新密码必须同时包含字母和数字")
+        return value
 
 
 class InvitationCreateRequest(ApiModel):
@@ -61,6 +95,17 @@ class InvitationCreatedRead(ApiModel):
     activation_token: str
 
 
+class InvitationAdminRead(ApiModel):
+    id: str
+    email: str
+    role: TeamRole
+    project_id: str | None = None
+    project_name: str | None = None
+    expires_at: datetime
+    created_at: datetime
+    status: Literal["PENDING", "EXPIRED", "ACCEPTED", "REVOKED"]
+
+
 class InvitationPublicRead(ApiModel):
     email: str
     team_name: str
@@ -77,7 +122,10 @@ class InvitationAcceptRequest(ApiModel):
     @field_validator("name")
     @classmethod
     def clean_name(cls, value: str) -> str:
-        return value.strip()
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("显示名称至少需要 2 个字符")
+        return cleaned
 
     @field_validator("password")
     @classmethod

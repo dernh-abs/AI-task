@@ -19,6 +19,7 @@ export type ApiAgentRun = components["schemas"]["AgentRunRead"];
 export type ApiContribution = components["schemas"]["ContributionRead"];
 export type ApiInvitation = components["schemas"]["InvitationPublicRead"];
 export type ApiInvitationCreated = components["schemas"]["InvitationCreatedRead"];
+export type ApiInvitationAdmin = components["schemas"]["InvitationAdminRead"];
 export type ApiTeam = components["schemas"]["TeamRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
@@ -33,10 +34,13 @@ async function request<T>(path:string, options:RequestInit={}):Promise<T> {
 
 export const login=(email:string,password:string)=>request<TokenResponse>("/auth/login",{method:"POST",body:JSON.stringify({email,password})});
 export const fetchMe=()=>request<ApiUser>("/auth/me");
+export const changePassword=(currentPassword:string,newPassword:string)=>request<TokenResponse>("/auth/change-password",{method:"POST",body:JSON.stringify({current_password:currentPassword,new_password:newPassword})});
 export const inspectInvitation=(token:string)=>request<ApiInvitation>(`/invitations/${encodeURIComponent(token)}`);
 export const acceptInvitation=(token:string,payload:components["schemas"]["InvitationAcceptRequest"])=>request<TokenResponse>(`/invitations/${encodeURIComponent(token)}/accept`,{method:"POST",body:JSON.stringify(payload)});
 export const fetchTeams=()=>request<ApiTeam[]>("/teams");
 export const createTeamInvitation=(teamId:string,payload:components["schemas"]["InvitationCreateRequest"])=>request<ApiInvitationCreated>(`/teams/${teamId}/invitations`,{method:"POST",body:JSON.stringify(payload)});
+export const fetchTeamInvitations=(teamId:string)=>request<ApiInvitationAdmin[]>(`/teams/${teamId}/invitations`);
+export const revokeTeamInvitation=(teamId:string,invitationId:string)=>request<ApiInvitationAdmin>(`/teams/${teamId}/invitations/${invitationId}/revoke`,{method:"POST"});
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
 export const fetchProjectMembers=(projectId:string)=>request<ApiProjectMember[]>(`/projects/${projectId}/members`);
 export const createProject=(payload:components["schemas"]["ProjectCreateRequest"])=>request<ApiProject>("/projects",{method:"POST",body:JSON.stringify(payload)});

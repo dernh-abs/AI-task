@@ -82,6 +82,7 @@ class User(SQLModel, table=True):
     name: str
     role: TeamRole = Field(sa_column=Column(String(32), nullable=False))
     is_active: bool = True
+    token_version: int = 0
     created_at: datetime = Field(default_factory=utc_now)
 
 

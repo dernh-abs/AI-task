@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 
 from .config import load_settings
 from .agent_runs import recover_stale_runs, start_agent_run
-from .accounts import accept_invitation, create_team_invitation, invitation_public_read, readable_teams
+from .accounts import accept_invitation, change_user_password, create_team_invitation, invitation_public_read, list_team_invitations, readable_teams, revoke_team_invitation
 from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
@@ -21,7 +21,7 @@ from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates
 from .models import AgentRun, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User
 from .permissions import can_manage_project, can_read_project, is_team_admin, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -68,16 +68,21 @@ def health() -> dict[str, str]:
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
-    user = session.exec(select(User).where(User.email == payload.email.lower())).first()
+    user = session.exec(select(User).where(User.email == payload.email)).first()
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-    token, expires_in = create_access_token(user.id)
+    token, expires_in = create_access_token(user.id, user.token_version)
     return TokenResponse(access_token=token, expires_in=expires_in, user=UserRead(id=user.id, email=user.email, name=user.name, role=user.role))
 
 
 @app.get("/api/auth/me", response_model=UserRead)
 def me(user: User = Depends(get_current_user)) -> UserRead:
     return UserRead(id=user.id, email=user.email, name=user.name, role=user.role)
+
+
+@app.post("/api/auth/change-password", response_model=TokenResponse)
+def change_password(payload: ChangePasswordRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> TokenResponse:
+    return change_user_password(session, user, payload)
 
 
 @app.get("/api/teams", response_model=list[TeamRead])
@@ -89,6 +94,16 @@ def list_teams(user: User = Depends(get_current_user), session: Session = Depend
 def invite_team_member(team_id: str, payload: InvitationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationCreatedRead:
     invitation, token = create_team_invitation(session, team_id, payload, user)
     return InvitationCreatedRead(id=invitation.id, email=invitation.email, team_id=invitation.team_id, expires_at=invitation.expires_at, activation_token=token)
+
+
+@app.get("/api/teams/{team_id}/invitations", response_model=list[InvitationAdminRead])
+def team_invitations(team_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[InvitationAdminRead]:
+    return list_team_invitations(session, team_id, user)
+
+
+@app.post("/api/teams/{team_id}/invitations/{invitation_id}/revoke", response_model=InvitationAdminRead)
+def revoke_invitation(team_id: str, invitation_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationAdminRead:
+    return revoke_team_invitation(session, team_id, invitation_id, user)
 
 
 @app.get("/api/invitations/{token}", response_model=InvitationPublicRead)

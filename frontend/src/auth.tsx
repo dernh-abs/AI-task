@@ -1,11 +1,11 @@
 import { createContext, type FormEvent, type ReactNode, useContext, useEffect, useState } from "react";
 import { Bot, CheckCircle2, KeyRound, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { acceptInvitation, ApiError, type ApiInvitation, type ApiUser, fetchMe, inspectInvitation, login, tokenStore } from "./api";
+import { acceptInvitation, ApiError, changePassword as changePasswordRequest, type ApiInvitation, type ApiUser, fetchMe, inspectInvitation, login, tokenStore } from "./api";
 import "./auth.css";
 import "./auth-application.css";
 
-type AuthContextValue={user:ApiUser;logout:()=>void};
+type AuthContextValue={user:ApiUser;logout:()=>void;changePassword:(currentPassword:string,newPassword:string)=>Promise<void>};
 const AuthContext=createContext<AuthContextValue|null>(null);
 export function useAuth(){const value=useContext(AuthContext);if(!value)throw new Error("AuthContext is missing");return value;}
 
@@ -42,5 +42,6 @@ export function AuthProvider({children}:{children:ReactNode}){
   useEffect(()=>{if(!tokenStore.get()){setChecking(false);return;}fetchMe().then(setUser).catch(()=>tokenStore.clear()).finally(()=>setChecking(false));},[]);
   if(checking)return <main className="login-screen"><div className="auth-loading">正在验证登录状态…</div></main>;
   if(!user)return inviteToken?<ActivationPage token={inviteToken} onLogin={setUser}/>:<LoginPage onLogin={setUser}/>;
-  return <AuthContext.Provider value={{user,logout:()=>{tokenStore.clear();setUser(null);}}}>{children}</AuthContext.Provider>;
+  const changePassword=async(currentPassword:string,newPassword:string)=>{const result=await changePasswordRequest(currentPassword,newPassword);tokenStore.set(result.access_token);setUser(result.user);};
+  return <AuthContext.Provider value={{user,logout:()=>{tokenStore.clear();setUser(null);},changePassword}}>{children}</AuthContext.Provider>;
 }

@@ -39,12 +39,14 @@ import {
   GripVertical,
   HandHelping,
   Inbox,
+  KeyRound,
   LayoutDashboard,
   Library,
   Link2,
   ListChecks,
   ListTodo,
   Menu,
+  Mail,
   MessageSquareText,
   MoreHorizontal,
   Paperclip,
@@ -93,7 +95,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeams, ignoreCandidate, performTaskAction, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiProject, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, ignoreCandidate, performTaskAction, revokeTeamInvitation, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -3080,7 +3082,7 @@ function TeamMemberStack({ members, limit = 5 }: { members: string[]; limit?: nu
   return <span className="team-avatar-stack" aria-label={`${members.length} 位成员`}>{visible.map((name) => <Avatar key={name} name={name} size="sm"/>)}{remaining > 0 && <i>+{remaining}</i>}</span>;
 }
 
-function InviteTeamMember({team,onClose}:{team:TeamWorkspace;onClose:()=>void}) {
+function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:()=>void;onCreated:()=>void}) {
   const { notify } = useHub();
   const [email,setEmail] = useState("");
   const [role,setRole] = useState<"MEMBER"|"CEO">("MEMBER");
@@ -3094,6 +3096,7 @@ function InviteTeamMember({team,onClose}:{team:TeamWorkspace;onClose:()=>void}) 
       const url = new URL(import.meta.env.BASE_URL || "/",window.location.origin);
       url.searchParams.set("invite",result.activation_token);
       setActivationLink(url.toString());
+      onCreated();
       notify("一次性邀请链接已生成，有效期 72 小时");
     } catch(reason) { setError(reason instanceof ApiError ? reason.message : "邀请创建失败"); }
     finally { setBusy(false); }
@@ -3104,10 +3107,34 @@ function InviteTeamMember({team,onClose}:{team:TeamWorkspace;onClose:()=>void}) 
   </AppModal>;
 }
 
+const invitationStatusLabel:Record<ApiInvitationAdmin["status"],string>={PENDING:"待激活",EXPIRED:"已过期",ACCEPTED:"已接受",REVOKED:"已撤销"};
+
+function TeamInvitationPanel({teamId,refreshKey}:{teamId:string;refreshKey:number}) {
+  const { notify } = useHub();
+  const [items,setItems] = useState<ApiInvitationAdmin[]>([]);
+  const [loading,setLoading] = useState(true);
+  const [busyId,setBusyId] = useState("");
+  const [error,setError] = useState("");
+  useEffect(()=>{let active=true;setLoading(true);setError("");fetchTeamInvitations(teamId).then(value=>{if(active)setItems(value);}).catch(reason=>{if(active)setError(reason instanceof ApiError?reason.message:"邀请记录读取失败");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[teamId,refreshKey]);
+  const revoke = async(invitation:ApiInvitationAdmin) => {
+    if(!window.confirm(`确认撤销发送给 ${invitation.email} 的邀请？撤销后原链接立即失效。`)) return;
+    setBusyId(invitation.id); setError("");
+    try { const updated=await revokeTeamInvitation(teamId,invitation.id); setItems(rows=>rows.map(item=>item.id===updated.id?updated:item)); notify("邀请已撤销，原链接已失效"); }
+    catch(reason) { setError(reason instanceof ApiError?reason.message:"邀请撤销失败"); }
+    finally { setBusyId(""); }
+  };
+  return <section className="panel team-invitation-card">
+    <header><div><span className="section-kicker">INVITATIONS</span><h3>成员邀请</h3></div><span>{items.filter(item=>item.status==="PENDING").length} 个待激活</span></header>
+    {loading?<p className="team-invitation-empty">正在读取邀请记录…</p>:error&&!items.length?<p className="team-invitation-error">{error}</p>:!items.length?<p className="team-invitation-empty">还没有邀请记录。</p>:<div className="team-invitation-list">{items.slice(0,6).map(item=><article key={item.id}><Mail size={15}/><div><strong>{item.email}</strong><small>{item.role==="CEO"?"团队管理员":"团队成员"}{item.project_name?` · ${item.project_name}`:""}</small></div><span className={`invitation-status ${item.status.toLowerCase()}`}>{invitationStatusLabel[item.status]}</span>{item.status==="PENDING"&&<button className="text-button danger" disabled={busyId===item.id} onClick={()=>revoke(item)}>{busyId===item.id?"撤销中…":"撤销"}</button>}</article>)}</div>}
+    {error&&items.length>0&&<p className="team-invitation-error">{error}</p>}
+  </section>;
+}
+
 function TeamsPage() {
   const { activeTeamId, setActiveTeamId, teams, notify, openPreview } = useHub();
   const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const [inviteOpen,setInviteOpen] = useState(false);
+  const [invitationRefresh,setInvitationRefresh] = useState(0);
   const showMembers = (team: TeamWorkspace) => openPreview({
     eyebrow: "团队成员",
     title: team.name,
@@ -3146,11 +3173,32 @@ function TeamsPage() {
           <div className="current-team-meta"><span><Users size={15}/>{activeTeam.members.length} 位成员</span><span><FolderKanban size={15}/>{activeTeam.projects.length} 个项目</span></div>
           <div className="team-member-board"><div><strong>团队成员</strong><button className="text-button" onClick={() => showMembers(activeTeam)}>查看全部</button></div><TeamMemberStack members={activeTeam.members} limit={6}/><p>{activeTeam.members.slice(0, 4).join("、")}{activeTeam.members.length > 4 ? `等 ${activeTeam.members.length} 人` : ""}</p></div>
         </section>
+        {activeTeam.role === "CEO" && activeTeam.id && <TeamInvitationPanel teamId={activeTeam.id} refreshKey={invitationRefresh}/>}
         <section className="panel team-scope-note"><h3>切换团队会发生什么？</h3><p>工作台、项目空间、任务与知识会优先显示当前团队的内容；个人 AI 助手仍可在你有权限的多个团队间检索。</p><button className="text-button" onClick={() => openPreview({eyebrow:"团队与权限",title:"团队范围如何生效",description:"团队负责组织成员和工作范围，项目负责承载具体目标与交付。",items:[{title:"当前团队",detail:"决定工作台默认呈现的项目、任务和知识"},{title:"跨团队访问",detail:"个人 AI 只检索你在其他团队中已经获得授权的内容"},{title:"项目权限",detail:"加入团队后仍需按项目授予编辑或查看权限"}],note:"切换团队不会退出其他团队，也不会改变已有权限。",primaryLabel:"我知道了"})}>了解团队与权限 <ArrowRight size={14}/></button></section>
       </aside>
-      {inviteOpen&&<InviteTeamMember team={activeTeam} onClose={()=>setInviteOpen(false)}/>}
+      {inviteOpen&&<InviteTeamMember team={activeTeam} onClose={()=>setInviteOpen(false)} onCreated={()=>setInvitationRefresh(value=>value+1)}/>}
     </div>
   </div>;
+}
+
+function PasswordSecurityCard() {
+  const { changePassword } = useAuth();
+  const { notify } = useHub();
+  const [currentPassword,setCurrentPassword] = useState("");
+  const [newPassword,setNewPassword] = useState("");
+  const [confirmation,setConfirmation] = useState("");
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  const submit = async(event:FormEvent) => {
+    event.preventDefault(); setError("");
+    if(newPassword!==confirmation){setError("两次输入的新密码不一致");return;}
+    if(newPassword.length<10||!/[A-Za-z]/.test(newPassword)||!/[0-9]/.test(newPassword)){setError("新密码至少 10 位，并且必须同时包含字母和数字");return;}
+    setBusy(true);
+    try { await changePassword(currentPassword,newPassword); setCurrentPassword("");setNewPassword("");setConfirmation("");notify("密码已更新，其他设备上的旧登录会话已失效"); }
+    catch(reason) { setError(reason instanceof ApiError?reason.message:"密码修改失败"); }
+    finally { setBusy(false); }
+  };
+  return <div className="settings-security-card"><header><span><KeyRound size={18}/></span><div><strong>登录密码</strong><p>修改后会立即注销其他设备上的旧登录会话。</p></div></header><form onSubmit={submit}><label><span>当前密码</span><input type="password" autoComplete="current-password" value={currentPassword} onChange={event=>setCurrentPassword(event.target.value)}/></label><label><span>新密码</span><input type="password" autoComplete="new-password" value={newPassword} onChange={event=>setNewPassword(event.target.value)} placeholder="至少 10 位，包含字母和数字"/></label><label><span>确认新密码</span><input type="password" autoComplete="new-password" value={confirmation} onChange={event=>setConfirmation(event.target.value)}/></label>{error&&<p className="settings-security-error">{error}</p>}<button className="button secondary" disabled={busy||!currentPassword||!newPassword||!confirmation}>{busy?"正在更新…":"修改密码"}</button></form></div>;
 }
 
 function SettingsPage() {
@@ -3166,7 +3214,7 @@ function SettingsPage() {
     <div className="settings-layout">
       <aside className="panel settings-nav">{["个人设置","通知规则","AI 与权限"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}<ChevronRight size={15}/></button>)}</aside>
       <section className="panel settings-main">
-        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期</span><select><option>本周</option><option>今天</option><option>本月</option></select></label></div><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
+        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期</span><select><option>本周</option><option>今天</option><option>本月</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
         {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则</h2><p>任务通知、@提及和 AI 结果统一进入顶部通知中心。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
         {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限</h2><p>定义 AI 能读取什么，以及哪些动作必须等待人工确认。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","只读取当前成员有权访问的文件和页面"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>AI 的读取权限不会超过当前操作成员；所有关键写入都会保留审计记录。</span></div></>}
       </section>

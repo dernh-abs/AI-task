@@ -299,3 +299,76 @@ def test_global_ceo_role_does_not_cross_team_boundary() -> None:
         assert client.get("/api/projects/project-isolated", headers=headers).status_code == 403
         assert client.post("/api/teams/team-isolated/invitations", headers=headers, json={"email": "isolated@quanyi.local"}).status_code == 403
         assert client.post("/api/projects", headers=headers, json={"team_id": "team-isolated", "name": "越权项目"}).status_code == 403
+
+
+def test_team_admin_can_list_and_revoke_pending_invitation() -> None:
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=ceo_headers,
+            json={"email": "revoked.member@quanyi.local", "role": "MEMBER"},
+        )
+        assert created.status_code == 200
+        invitation_id = created.json()["id"]
+        token = created.json()["activation_token"]
+
+        listed = client.get("/api/teams/team-quanyi/invitations", headers=ceo_headers)
+        assert listed.status_code == 200
+        pending = next(item for item in listed.json() if item["id"] == invitation_id)
+        assert pending["status"] == "PENDING"
+        assert pending["email"] == "revoked.member@quanyi.local"
+        assert "activation_token" not in pending
+
+        revoked = client.post(f"/api/teams/team-quanyi/invitations/{invitation_id}/revoke", headers=ceo_headers)
+        assert revoked.status_code == 200
+        assert revoked.json()["status"] == "REVOKED"
+        assert client.get(f"/api/invitations/{token}").status_code == 410
+
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        assert client.get("/api/teams/team-quanyi/invitations", headers=member_headers).status_code == 403
+        assert client.post(f"/api/teams/team-quanyi/invitations/{invitation_id}/revoke", headers=member_headers).status_code == 403
+
+
+def test_password_change_rotates_token_and_rejects_old_password() -> None:
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=ceo_headers,
+            json={"email": "password.member@quanyi.local", "role": "MEMBER"},
+        ).json()
+        activated = client.post(
+            f"/api/invitations/{created['activation_token']}/accept",
+            json={"name": "改密成员", "password": "initial-password-2026"},
+        )
+        original_token = activated.json()["access_token"]
+        original_headers = {"Authorization": f"Bearer {original_token}"}
+
+        wrong = client.post(
+            "/api/auth/change-password",
+            headers=original_headers,
+            json={"current_password": "wrong-password-2026", "new_password": "updated-password-2026"},
+        )
+        assert wrong.status_code == 400
+        same = client.post(
+            "/api/auth/change-password",
+            headers=original_headers,
+            json={"current_password": "initial-password-2026", "new_password": "initial-password-2026"},
+        )
+        assert same.status_code == 422
+
+        changed = client.post(
+            "/api/auth/change-password",
+            headers=original_headers,
+            json={"current_password": "initial-password-2026", "new_password": "updated-password-2026"},
+        )
+        assert changed.status_code == 200
+        replacement_headers = {"Authorization": f"Bearer {changed.json()['access_token']}"}
+        assert client.get("/api/auth/me", headers=replacement_headers).status_code == 200
+        assert client.get("/api/auth/me", headers=original_headers).status_code == 401
+        assert client.post("/api/auth/login", json={"email": "password.member@quanyi.local", "password": "initial-password-2026"}).status_code == 401
+        assert client.post("/api/auth/login", json={"email": "password.member@quanyi.local", "password": "updated-password-2026"}).status_code == 200

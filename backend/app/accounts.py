@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from .models import AuditEvent, Invitation, Project, ProjectMember, ProjectRole, Team, TeamMember, TeamRole, User, utc_now
-from .schemas import InvitationAcceptRequest, InvitationCreateRequest, InvitationPublicRead, TeamMemberRead, TeamRead, TokenResponse, UserRead
-from .security import create_access_token, hash_password
+from .schemas import ChangePasswordRequest, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationPublicRead, TeamMemberRead, TeamRead, TokenResponse, UserRead
+from .security import create_access_token, hash_password, verify_password
 
 
 INVITATION_TTL_HOURS = 72
@@ -36,10 +36,39 @@ def _pending_invitation(session: Session, token: str) -> Invitation:
     return invitation
 
 
-def create_team_invitation(session: Session, team_id: str, payload: InvitationCreateRequest, actor: User) -> tuple[Invitation, str]:
+def _require_team_admin(session: Session, team_id: str, actor: User) -> TeamMember:
     membership = session.get(TeamMember, (team_id, actor.id))
     if not membership or membership.role != TeamRole.CEO:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以邀请成员")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以管理邀请")
+    return membership
+
+
+def _invitation_status(invitation: Invitation) -> str:
+    if invitation.accepted_at:
+        return "ACCEPTED"
+    if invitation.revoked_at:
+        return "REVOKED"
+    if _as_utc(invitation.expires_at) <= datetime.now(timezone.utc):
+        return "EXPIRED"
+    return "PENDING"
+
+
+def _invitation_admin_read(session: Session, invitation: Invitation) -> InvitationAdminRead:
+    project = session.get(Project, invitation.project_id) if invitation.project_id else None
+    return InvitationAdminRead(
+        id=invitation.id,
+        email=invitation.email,
+        role=invitation.role,
+        project_id=invitation.project_id,
+        project_name=project.name if project else None,
+        expires_at=invitation.expires_at,
+        created_at=invitation.created_at,
+        status=_invitation_status(invitation),
+    )
+
+
+def create_team_invitation(session: Session, team_id: str, payload: InvitationCreateRequest, actor: User) -> tuple[Invitation, str]:
+    _require_team_admin(session, team_id, actor)
     if session.exec(select(User).where(User.email == payload.email)).first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已经注册")
     if payload.project_id:
@@ -66,9 +95,48 @@ def create_team_invitation(session: Session, team_id: str, payload: InvitationCr
         expires_at=now + timedelta(hours=INVITATION_TTL_HOURS),
     )
     session.add(invitation)
+    session.add(AuditEvent(id=f"audit-{uuid4().hex}", actor_id=actor.id, resource_type="invitation", resource_id=invitation.id, action="CREATED", detail_json="{}"))
     session.commit()
     session.refresh(invitation)
     return invitation, raw_token
+
+
+def list_team_invitations(session: Session, team_id: str, actor: User) -> list[InvitationAdminRead]:
+    _require_team_admin(session, team_id, actor)
+    rows = session.exec(select(Invitation).where(Invitation.team_id == team_id).order_by(Invitation.created_at.desc())).all()
+    return [_invitation_admin_read(session, invitation) for invitation in rows]
+
+
+def revoke_team_invitation(session: Session, team_id: str, invitation_id: str, actor: User) -> InvitationAdminRead:
+    _require_team_admin(session, team_id, actor)
+    invitation = session.get(Invitation, invitation_id)
+    if not invitation or invitation.team_id != team_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="邀请不存在")
+    current_status = _invitation_status(invitation)
+    if current_status == "ACCEPTED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已接受的邀请不能撤销")
+    if current_status == "PENDING":
+        invitation.revoked_at = utc_now()
+        session.add(invitation)
+        session.add(AuditEvent(id=f"audit-{uuid4().hex}", actor_id=actor.id, resource_type="invitation", resource_id=invitation.id, action="REVOKED", detail_json="{}"))
+        session.commit()
+        session.refresh(invitation)
+    return _invitation_admin_read(session, invitation)
+
+
+def change_user_password(session: Session, user: User, payload: ChangePasswordRequest) -> TokenResponse:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前密码不正确")
+    if verify_password(payload.new_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="新密码不能与当前密码相同")
+    user.password_hash = hash_password(payload.new_password)
+    user.token_version += 1
+    session.add(user)
+    session.add(AuditEvent(id=f"audit-{uuid4().hex}", actor_id=user.id, resource_type="user", resource_id=user.id, action="PASSWORD_CHANGED", detail_json="{}"))
+    session.commit()
+    session.refresh(user)
+    access_token, expires_in = create_access_token(user.id, user.token_version)
+    return TokenResponse(access_token=access_token, expires_in=expires_in, user=UserRead(id=user.id, email=user.email, name=user.name, role=user.role))
 
 
 def invitation_public_read(session: Session, token: str) -> InvitationPublicRead:
@@ -112,7 +180,7 @@ def accept_invitation(session: Session, token: str, payload: InvitationAcceptReq
         session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="邀请已被使用或该邮箱已经注册") from exc
 
-    access_token, expires_in = create_access_token(user.id)
+    access_token, expires_in = create_access_token(user.id, user.token_version)
     return TokenResponse(access_token=access_token, expires_in=expires_in, user=UserRead(id=user.id, email=user.email, name=user.name, role=user.role))
 
 

@@ -17,11 +17,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     try:
-        user_id = decode_access_token(credentials.credentials)
+        user_id, token_version = decode_access_token(credentials.credentials)
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from exc
     user = session.get(User, user_id)
-    if not user or not user.is_active:
+    if not user or not user.is_active or user.token_version != token_version:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User is unavailable")
     return user
-
