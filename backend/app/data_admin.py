@@ -21,6 +21,8 @@ from .models import (
     IdempotencyRecord,
     Invitation,
     Project,
+    ProjectChatMessage,
+    ProjectConversation,
     ProjectMember,
     SourceSnapshot,
     Stage,
@@ -34,7 +36,7 @@ from .models import (
 
 
 CONFIRMATION = "RESET_APPLICATION_DATA"
-DELETE_ORDER = [AgentRunLog, ContributionEvent, ExternalReminderEvent, ExternalDependency, CandidateTask, SourceSnapshot, TaskSubmission, TaskStatusHistory, AgentRun, AiCallLog, AiResponseCache, AuditEvent, IdempotencyRecord, Invitation, ExternalContact, Task, Stage, ProjectMember, Project, TeamMember, Team, User]
+DELETE_ORDER = [ProjectChatMessage, ProjectConversation, AgentRunLog, ContributionEvent, ExternalReminderEvent, ExternalDependency, CandidateTask, SourceSnapshot, TaskSubmission, TaskStatusHistory, AgentRun, AiCallLog, AiResponseCache, AuditEvent, IdempotencyRecord, Invitation, ExternalContact, Task, Stage, ProjectMember, Project, TeamMember, Team, User]
 
 
 def row_counts(session: Session) -> list[tuple[str, int]]:

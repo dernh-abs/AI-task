@@ -16,6 +16,8 @@ export type ApiExternalDependency = components["schemas"]["ExternalDependencyRea
 export type ApiCandidate = components["schemas"]["CandidateRead"];
 export type ApiCandidateExtractionResponse = components["schemas"]["CandidateExtractionResponse"];
 export type ApiAgentRun = components["schemas"]["AgentRunRead"];
+export type ApiProjectConversation = components["schemas"]["ProjectConversationRead"];
+export type ApiProjectChatMessage = components["schemas"]["ProjectChatMessageRead"];
 export type ApiContribution = components["schemas"]["ContributionRead"];
 export type ApiInvitation = components["schemas"]["InvitationPublicRead"];
 export type ApiInvitationCreated = components["schemas"]["InvitationCreatedRead"];
@@ -53,9 +55,15 @@ export const fetchTaskSubmissions=(taskId:string)=>request<ApiSubmission[]>(`/ta
 export const fetchExternalContacts=()=>request<ApiExternalContact[]>("/external-contacts");
 export const fetchExternalDependency=(taskId:string)=>request<ApiExternalDependency|null>(`/tasks/${taskId}/external-dependency`);
 export const createCandidateExtraction=(payload:components["schemas"]["CandidateExtractionRequest"])=>request<ApiCandidateExtractionResponse>("/candidate-extractions",{method:"POST",body:JSON.stringify(payload)});
+export const fetchCandidates=(projectId?:string)=>request<ApiCandidate[]>(`/candidates${projectId?`?project_id=${encodeURIComponent(projectId)}`:""}`);
 export const updateCandidate=(candidateId:string,payload:components["schemas"]["CandidateUpdateRequest"])=>request<ApiCandidate>(`/candidates/${candidateId}`,{method:"PATCH",body:JSON.stringify(payload)});
 export const confirmCandidate=(candidateId:string,expectedVersion:number,idempotencyKey=crypto.randomUUID())=>request<components["schemas"]["CandidateConfirmResponse"]>(`/candidates/${candidateId}/confirm`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({expected_version:expectedVersion})});
 export const ignoreCandidate=(candidateId:string,idempotencyKey=crypto.randomUUID())=>request<ApiCandidate>(`/candidates/${candidateId}/ignore`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey}});
 export const startAgentRun=(taskId:string,revisionInstruction="")=>request<components["schemas"]["AgentRunStartResponse"]>(`/tasks/${taskId}/agent-runs`,{method:"POST",body:JSON.stringify({revision_instruction:revisionInstruction})});
 export const fetchAgentRuns=(taskId:string)=>request<ApiAgentRun[]>(`/tasks/${taskId}/agent-runs`);
+export const fetchAllAgentRuns=(filters:{status?:string;projectId?:string}={})=>{const params=new URLSearchParams();if(filters.status)params.set("status",filters.status);if(filters.projectId)params.set("project_id",filters.projectId);const query=params.toString();return request<ApiAgentRun[]>(`/agent-runs${query?`?${query}`:""}`);};
+export const fetchProjectConversations=(projectId:string)=>request<ApiProjectConversation[]>(`/projects/${projectId}/conversations`);
+export const createProjectConversation=(projectId:string,title="新对话")=>request<ApiProjectConversation>(`/projects/${projectId}/conversations`,{method:"POST",body:JSON.stringify({title})});
+export const fetchProjectChatMessages=(conversationId:string)=>request<ApiProjectChatMessage[]>(`/project-conversations/${conversationId}/messages`);
+export const sendProjectChatMessage=(conversationId:string,content:string,idempotencyKey=crypto.randomUUID())=>request<components["schemas"]["ProjectChatSendResponse"]>(`/project-conversations/${conversationId}/messages`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({content})});
 export const fetchContributions=()=>request<ApiContribution[]>("/contributions");

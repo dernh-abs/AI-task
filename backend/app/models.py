@@ -326,6 +326,30 @@ class AgentRunLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ProjectConversation(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    project_id: str = Field(foreign_key="project.id", index=True)
+    title: str
+    created_by: str = Field(foreign_key="user.id", index=True)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now, index=True)
+
+
+class ProjectChatMessage(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    conversation_id: str = Field(foreign_key="projectconversation.id", index=True)
+    author_id: str | None = Field(default=None, foreign_key="user.id", index=True)
+    role: str = Field(sa_column=Column(String(16), nullable=False, index=True))
+    content: str = Field(sa_column=Column(Text, nullable=False))
+    execution_mode: AiExecutionMode | None = Field(default=None, sa_column=Column(String(16), nullable=True))
+    prompt_version: str | None = None
+    ai_call_id: str | None = Field(default=None, index=True)
+    request_key: str | None = Field(default=None, unique=True, index=True)
+    reply_to_message_id: str | None = Field(default=None, foreign_key="projectchatmessage.id")
+    context_task_ids_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class ContributionEvent(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("task_id", "event_type", "submission_version", name="uq_contribution_task_event_version"),)
 

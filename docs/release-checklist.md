@@ -12,6 +12,11 @@
 - 项目/阶段/任务 CRUD、阶段独立状态、加权进度、健康度与贡献聚合。
 - Alembic 可从空库升级到最新、降级到底并再次升级。
 - 前端 TypeScript 检查和生产构建通过。
+- P0 候选链路统一：所有入口确认后由服务端创建任务，开放认领入口已关闭。
+- P1 项目 AI 会话具备持久化、项目权限、真实任务引用和幂等消息写入。
+- P1 AI 执行中心直接读取服务端 AgentRun，停止、重试和模拟进度入口已关闭。
+- 项目看板只调用服务端合法状态动作，不直接修改前端任务状态。
+- `pnpm check:truth` 验证正式入口未重新引用已知 Demo 写链路。
 
 ## 发布前必须人工完成
 
@@ -34,6 +39,7 @@ cd backend
 ```powershell
 cd frontend
 pnpm install --frozen-lockfile
+pnpm check:truth
 pnpm typecheck
 pnpm build
 ```

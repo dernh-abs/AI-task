@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/build-design-preview.mjs",
+    "check:truth": "node scripts/check-runtime-truth.mjs",
     "typecheck": "tsc -b --pretty false",
     "generate:api": "openapi-typescript ../backend/openapi.json -o src/api-schema.d.ts",
     "preview": "vite preview"

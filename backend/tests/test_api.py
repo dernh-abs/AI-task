@@ -228,6 +228,66 @@ def test_agent_run_human_confirmation_and_review() -> None:
         assert submissions[0]["asset_reference"] == f"agent-run:{revised_run['id']}"
 
 
+def test_global_agent_run_list_uses_real_records_and_permissions() -> None:
+    with TestClient(app) as client:
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        created = client.post("/api/tasks", headers=headers, json={"project_id": "p-quanyi", "title": "全局运行列表验证", "description": "验证执行中心读取真实运行", "deliverable": "真实 AgentRun", "acceptance": "刷新后可读取", "owner_id": "u-member", "reviewer_id": "u-ceo", "execution_mode": "AI"})
+        assert created.status_code == 200
+        task_id = created.json()["id"]
+        assert client.post(f"/api/tasks/{task_id}/actions/START", headers={**headers, "Idempotency-Key": "global-run-start"}, json={"expected_version": 1}).status_code == 200
+        started = client.post(f"/api/tasks/{task_id}/agent-runs", headers=headers)
+        assert started.status_code == 200
+        run_id = started.json()["run"]["id"]
+
+        listed = client.get("/api/agent-runs", headers=headers)
+        assert listed.status_code == 200
+        run = next(item for item in listed.json() if item["id"] == run_id)
+        assert run["task_title"] == "全局运行列表验证"
+        assert run["project_id"] == "p-quanyi"
+        assert run["project_name"] == "全意 AI 工作中枢"
+        assert run["requested_by_name"] == "廖婉琛"
+        assert client.get("/api/agent-runs?status=SUCCEEDED", headers=headers).status_code == 200
+        assert client.get("/api/agent-runs?status=UNKNOWN", headers=headers).status_code == 422
+
+        observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
+        observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
+        assert client.get("/api/agent-runs", headers=observer_headers).json() == []
+        assert client.get("/api/agent-runs?project_id=p-quanyi", headers=observer_headers).status_code == 403
+
+
+def test_project_chat_is_persistent_grounded_and_idempotent() -> None:
+    with TestClient(app) as client:
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        created = client.post("/api/projects/p-quanyi/conversations", headers=headers, json={"title": "新对话"})
+        assert created.status_code == 200
+        conversation_id = created.json()["id"]
+        sent = client.post(f"/api/project-conversations/{conversation_id}/messages", headers={**headers, "Idempotency-Key": "project-chat-send-1"}, json={"content": "当前项目有哪些需要优先处理的任务？"})
+        assert sent.status_code == 200
+        body = sent.json()
+        assert body["assistant_message"]["execution_mode"] == "MOCK"
+        assert body["assistant_message"]["prompt_version"] == "project-chat-v1"
+        assert body["assistant_message"]["context_task_ids"]
+        assert body["assistant_message"]["context_task_titles"]
+        assert "会议和资产尚未接入" in body["assistant_message"]["content"]
+
+        replay = client.post(f"/api/project-conversations/{conversation_id}/messages", headers={**headers, "Idempotency-Key": "project-chat-send-1"}, json={"content": "当前项目有哪些需要优先处理的任务？"})
+        assert replay.status_code == 200
+        assert replay.json()["assistant_message"]["id"] == body["assistant_message"]["id"]
+        messages = client.get(f"/api/project-conversations/{conversation_id}/messages", headers=headers)
+        assert messages.status_code == 200
+        assert len(messages.json()) == 2
+        conversations = client.get("/api/projects/p-quanyi/conversations", headers=headers).json()
+        assert conversations[0]["message_count"] == 2
+        assert conversations[0]["title"].startswith("当前项目有哪些")
+
+        observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
+        observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
+        assert client.get(f"/api/project-conversations/{conversation_id}/messages", headers=observer_headers).status_code == 403
+        assert client.post("/api/projects/p-quanyi/conversations", headers=observer_headers, json={"title": "越权对话"}).status_code == 403
+
+
 def test_project_stage_task_crud_and_weighted_aggregation() -> None:
     with TestClient(app) as client:
         login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()

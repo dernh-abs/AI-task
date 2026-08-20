@@ -81,11 +81,9 @@ import {
 import {
   experts,
   initialAssets,
-  initialCandidates,
   initialHelpRequests,
   initialProjects,
   initialTasks,
-  openTasks,
   skills,
   type Asset,
   type Candidate,
@@ -95,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, ignoreCandidate, performTaskAction, revokeTeamInvitation, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createProjectConversation, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchAllAgentRuns, fetchCandidates, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectChatMessages, fetchProjectConversations, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, ignoreCandidate, performTaskAction, revokeTeamInvitation, sendProjectChatMessage, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectChatMessage, type ApiProjectConversation, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -114,8 +112,8 @@ const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, pr
 type HubContextValue = {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
-  candidates: Candidate[];
-  setCandidates: React.Dispatch<React.SetStateAction<Candidate[]>>;
+  candidates: ApiCandidate[];
+  setCandidates: React.Dispatch<React.SetStateAction<ApiCandidate[]>>;
   projects: Project[];
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   helps: HelpRequest[];
@@ -136,7 +134,7 @@ type HubContextValue = {
   openTask: (task: Task) => void;
   openAsset: (asset: Asset) => void;
   openPreview: (preview: FlowPreview) => void;
-  openCandidate: (candidate: Candidate) => void;
+  openCandidate: (candidate: ApiCandidate) => void;
   startChatWith: (prompt: string) => void;
 };
 
@@ -573,7 +571,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [dataError, setDataError] = useState("");
-  const [candidates, setCandidates] = useState<Candidate[]>(demoDataEnabled ? initialCandidates : []);
+  const [candidates, setCandidates] = useState<ApiCandidate[]>([]);
   const [helps, setHelps] = useState<HelpRequest[]>(demoDataEnabled ? initialHelpRequests : []);
   const [assets, setAssets] = useState<Asset[]>(demoDataEnabled ? initialAssets : []);
   const [knowledgePages, setKnowledgePages] = useState<KnowledgePage[]>(demoDataEnabled ? initialKnowledgePages : []);
@@ -589,7 +587,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     return savedTeamId || "";
   });
   const [toast, setToast] = useState("");
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<ApiCandidate | null>(null);
   const [chatPrompt, setChatPrompt] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [flowPreview, setFlowPreview] = useState<FlowPreview | null>(null);
@@ -602,12 +600,13 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     let active = true;
     setDataLoading(true);
     setDataError("");
-    Promise.all([fetchProjects(), fetchTasks(), fetchTeams()]).then(([projectRows, taskRows, teamRows]) => {
+    Promise.all([fetchProjects(), fetchTasks(), fetchTeams(), fetchCandidates()]).then(([projectRows, taskRows, teamRows, candidateRows]) => {
       if (!active) return;
       setProjects(projectRows.map(projectFromApi));
       setTasks(taskRows.map(taskFromApi));
       const mappedTeams = teamRows.map(teamFromApi);
       setTeams(mappedTeams);
+      setCandidates(candidateRows.filter((candidate) => candidate.status === "ACTIVE"));
       setActiveTeamId((current) => mappedTeams.some((team) => team.id === current) ? current : mappedTeams[0]?.id || "");
     }).catch(() => {
       if (active) setDataError("无法读取服务端项目数据，请确认后端已启动");
@@ -765,11 +764,11 @@ function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile
         </nav>
 
         <div className="sidebar-bottom">
-          <button className="sidebar-ai" onClick={() => navigate("/ai")} aria-label="问问 AI 助手" title="问问 AI 助手">
+          <button className="sidebar-ai" onClick={() => navigate("/projects")} aria-label="进入项目 AI 协作" title="进入项目 AI 协作">
             <span className="assistant-orb small"><Sparkles size={16} /></span>
             <span>
-              <strong>问问 AI 助手</strong>
-              <small>搜索、分析或创建任务</small>
+              <strong>项目 AI 协作</strong>
+              <small>进入项目后基于真实任务提问</small>
             </span>
             <ChevronRight size={16} />
           </button>
@@ -798,13 +797,11 @@ function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile
 }
 
 function Topbar({ openMobile }: { openMobile: () => void }) {
-  const { notifications } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
-  const unreadCount = notifications.filter((item) => !item.read).length;
   return (
     <>
       <header className="topbar">
@@ -813,7 +810,7 @@ function Topbar({ openMobile }: { openMobile: () => void }) {
         </button>
         <button className="global-search" onClick={() => setSearchOpen(true)}>
           <Search size={17} />
-          <span>搜索任务、项目、资产或直接问 AI...</span>
+          <span>搜索真实任务和项目...</span>
           <kbd>⌘ K</kbd>
         </button>
         <div className="topbar-actions">
@@ -824,7 +821,6 @@ function Topbar({ openMobile }: { openMobile: () => void }) {
           <div className="popover-wrap">
             <button className="icon-button notice-button" onClick={() => setNoticeOpen(!noticeOpen)} aria-label="通知">
               <Bell size={18} />
-              {unreadCount > 0 && <span className="notification-badge">{unreadCount > 9 ? "9+" : unreadCount}</span>}
             </button>
             {noticeOpen && <NotificationPopover close={() => setNoticeOpen(false)} />}
           </div>
@@ -874,21 +870,15 @@ function Shell() {
 }
 
 function Dashboard() {
-  const { tasks, candidates, activeTeamId, teams, openTask, openCandidate, openPreview } = useHub();
+  const { tasks, candidates, activeTeamId, teams, openTask, openPreview } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const dashboardView = user.role === "CEO" ? "ceo" : "member";
   const requestedExtraction = queryParams.get("extract") as ExtractionSource | null;
-  const legacyMineRequest = queryParams.get("view") === "mine";
-  const requestedAssigned = queryParams.get("assigned") === "1" || legacyMineRequest;
-  const requestedAssignedSource = (queryParams.get("source") || (legacyMineRequest ? requestedExtraction : null)) as ExtractionSource | null;
-  const [extractionOpen, setExtractionOpen] = useState<ExtractionSource | null>(requestedAssigned ? null : requestedExtraction);
-  const [assignedOpen, setAssignedOpen] = useState(requestedAssigned);
-  const [assignedSource, setAssignedSource] = useState<ExtractionSource | null>(requestedAssignedSource);
+  const [extractionOpen, setExtractionOpen] = useState<ExtractionSource | null>(requestedExtraction);
   const [todayOpen, setTodayOpen] = useState(false);
-  const [assistantPrompt, setAssistantPrompt] = useState("");
   const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const currentUser = user.name;
   const personalTasks = tasks
@@ -900,12 +890,8 @@ function Dashboard() {
     .filter((task) => task.id !== primaryPersonalTask?.id)
     .sort((a, b) => (["blocked", "review", "confirm", "progress", "ai"].indexOf(a.status) - ["blocked", "review", "confirm", "progress", "ai"].indexOf(b.status)))
     .slice(0, 3);
-  const pendingAssignments = Object.values(visibleExtractionBatches)
-    .flatMap((batch) => batch.tasks)
-    .filter((task) => task.owner === currentUser && task.status === "待负责人确认");
-  const pendingDistributionCount = Object.values(visibleExtractionBatches)
-    .flatMap((batch) => batch.tasks)
-    .filter((task) => task.status === "待负责人确认").length;
+  const pendingAssignments = candidates.filter((candidate) => candidate.status === "ACTIVE" && candidate.owner_id === user.id);
+  const pendingDistributionCount = candidates.filter((candidate) => candidate.status === "ACTIVE").length;
   const managerDecisions = tasks
     .filter((task) => (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && task.owner === currentUser)
       || (task.apiStatus === "WAITING_REVIEW" && task.reviewer === currentUser)
@@ -922,39 +908,27 @@ function Dashboard() {
       : { task, issue:"等待外部", tone:"amber", suggestion:"查看依赖" });
   const receiverMetrics = [
     { label: "未完成", value: personalTasks.length, note: "我的全部进行中任务", icon: ListChecks, tone: "blue", action: () => navigate("/tasks") },
-    { label: "今天", value: todayTasks.length, note: "今天必须完成", icon: Clock3, tone: "violet", action: () => { setTodayOpen(true); setAssignedOpen(false); setExtractionOpen(null); } },
+    { label: "今天", value: todayTasks.length, note: "今天必须完成", icon: Clock3, tone: "violet", action: () => { setTodayOpen(true); setExtractionOpen(null); } },
     { label: "逾期", value: 0, note: "目前没有逾期任务", icon: AlertCircle, tone: "green", action: () => openPreview({ eyebrow: "任务状态", title: "目前没有逾期任务", description: personalTasks.length ? "当前没有识别到逾期任务，请在任务池继续查看全部工作。" : "当前还没有分配给你的任务。", primaryLabel: "查看全部任务", primaryRoute: "/tasks" }) },
-    { label: "待接收", value: pendingAssignments.length, note: "确认后进入任务池", icon: Inbox, tone: "cyan", action: () => { setAssignedSource(null); setAssignedOpen(true); setExtractionOpen(null); } },
+    { label: "候选待处理", value: pendingAssignments.length, note: "由项目管理员审核创建", icon: Inbox, tone: "cyan", action: () => navigate("/tasks?tab=candidates") },
   ];
   const dispatcherMetrics = [
     { label: "待我决策", value: managerDecisions.length, note: "不处理将影响团队推进", icon: Target, tone: "blue", action: () => navigate("/tasks?focus=decisions") },
     { label: "逾期 / 临期", value: todayTasks.length, note: todayTasks.length ? "今天需要跟进" : "当前没有临期任务", icon: Clock3, tone: "orange", action: () => navigate("/tasks") },
     { label: "阻塞 / 求助", value: tasks.filter((task) => ["blocked", "external"].includes(task.status)).length, note: "需要协调资源或方向", icon: AlertCircle, tone: "red", action: () => navigate("/help") },
-    { label: "待分配", value: pendingDistributionCount, note: "来自会议与聊天", icon: Inbox, tone: "violet", action: () => openExtraction("meeting") },
+    { label: "待分配", value: pendingDistributionCount, note: "服务端候选任务", icon: Inbox, tone: "violet", action: () => navigate("/tasks?tab=candidates") },
   ];
   const metrics = dashboardView === "ceo" ? dispatcherMetrics : receiverMetrics;
 
   useEffect(() => {
-    if (requestedAssigned) {
-      setAssignedSource(requestedAssignedSource);
-      setAssignedOpen(true);
-      setExtractionOpen(null);
-    } else if (requestedExtraction && visibleExtractionBatches[requestedExtraction]) {
+    if (requestedExtraction && visibleExtractionBatches[requestedExtraction]) {
       setExtractionOpen(requestedExtraction);
     }
-  }, [requestedAssigned, requestedAssignedSource, requestedExtraction]);
+  }, [requestedExtraction]);
 
   const openExtraction = (source: ExtractionSource) => {
     setExtractionOpen(source);
-    setAssignedOpen(false);
     setTodayOpen(false);
-  };
-
-  const submitAssistantPrompt = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const prompt = assistantPrompt.trim();
-    if (!prompt) return;
-    navigate("/ai?prompt=" + encodeURIComponent(prompt));
   };
 
   const assistantCard = (
@@ -963,28 +937,22 @@ function Dashboard() {
         <div className="assistant-card-heading">
           <AssistantLifeOrb size="tiny" />
           <div>
-            <h2>AI 助手</h2>
-            <p>跨项目、任务和资产工作</p>
+            <h2>项目 AI 协作</h2>
+            <p>基于单个项目的真实任务工作</p>
           </div>
         </div>
       </div>
       <div className="assistant-life-stage" role="status" aria-live="polite">
         <AssistantLifeOrb size="dashboard" state="idle" />
         <span className="assistant-life-copy">
-          <strong><i />随时可用</strong>
-          <small>从这里发起，完整对话会在 AI 助手中打开</small>
+          <strong><i />项目模式已开放</strong>
+          <small>选择项目后进入持久化对话；个人跨项目助手暂未开放</small>
         </span>
       </div>
-      <form className="assistant-input" onSubmit={submitAssistantPrompt}>
-        <Paperclip size={16} />
-        <input
-          value={assistantPrompt}
-          onChange={(event) => setAssistantPrompt(event.target.value)}
-          placeholder="问我任何与工作有关的问题..."
-          aria-label="向工作台 AI 助手提问"
-        />
-        <button type="submit" disabled={!assistantPrompt.trim()} aria-label="发送给 AI 助手"><ArrowRight size={15} /></button>
-      </form>
+      <div className="assistant-input">
+        <FolderKanban size={16} />
+        <button className="assistant-project-entry" type="button" onClick={() => navigate("/projects")} aria-label="选择项目并进入 AI 协作">选择项目并进入 AI 协作 <ArrowRight size={15} /></button>
+      </div>
     </section>
   );
 
@@ -1065,10 +1033,10 @@ function Dashboard() {
             <section className="panel assignment-inbox-panel">
               <div className="panel-title-row">
                 <div><h2>AI 任务提取</h2><p>会议与聊天中分给我的候选任务</p></div>
-                <button className="text-button" onClick={() => {setAssignedSource(null); setAssignedOpen(true); setExtractionOpen(null);}}>查看全部 <ArrowRight size={14}/></button>
+                <button className="text-button" onClick={() => navigate("/tasks?tab=candidates")}>查看全部 <ArrowRight size={14}/></button>
               </div>
               <div className="dispatcher-extraction-grid member-extraction-grid">
-                {(["meeting", "chat"] as const).map((source) => {const assigned = visibleExtractionBatches[source].tasks.filter((task) => task.owner === currentUser && task.status === "待负责人确认"); return <button key={source} onClick={() => {setAssignedSource(source); setAssignedOpen(true); setExtractionOpen(null);}}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {assigned.length} 项</strong><small>待我确认</small></span><ChevronRight size={14}/></button>;})}
+                <button onClick={() => navigate("/tasks?tab=candidates")}><span className="extraction-source-icon meeting"><MessageSquareText size={16}/></span><span><strong>真实候选 {pendingAssignments.length} 项</strong><small>刷新后仍保留</small></span><ChevronRight size={14}/></button>
               </div>
             </section>
             {assistantCard}
@@ -1114,7 +1082,7 @@ function Dashboard() {
                 <button className="text-button" onClick={() => openExtraction("meeting")}>查看全部 <ArrowRight size={14}/></button>
               </div>
               <div className="dispatcher-extraction-grid">
-                {(["meeting", "chat"] as const).map((source) => {const batch = visibleExtractionBatches[source]; const pending = batch.tasks.filter((task) => task.status === "待负责人确认").length; return <button key={source} onClick={() => openExtraction(source)}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>{source === "meeting" ? "会议" : "聊天"} {batch.tasks.length} 项</strong><small>待分发 {pending}</small></span><ChevronRight size={14}/></button>;})}
+                {(["meeting", "chat"] as const).map((source) => <button key={source} onClick={() => openExtraction(source)}><span className={"extraction-source-icon " + source}>{source === "meeting" ? <MessageSquareText size={16}/> : <Users size={16}/>}</span><span><strong>导入{source === "meeting" ? "会议纪要" : "聊天原文"}</strong><small>保存快照并生成真实候选</small></span><ChevronRight size={14}/></button>)}
               </div>
             </section>
             {assistantCard}
@@ -1123,7 +1091,6 @@ function Dashboard() {
         </div>
       </div>
       {extractionOpen && <TaskExtractionReview initialSource={extractionOpen} onClose={() => {setExtractionOpen(null); if (requestedExtraction) navigate("/", {replace:true});}} />}
-      {assignedOpen && <MyAssignedTasksReview initialSource={assignedSource} onClose={() => {setAssignedOpen(false); if (requestedAssigned) navigate("/", {replace:true});}} />}
       {todayOpen && <TodayTasksDialog tasks={todayTasks} onClose={() => setTodayOpen(false)} onOpenTask={(task) => {setTodayOpen(false); openTask(task);}} />}
     </>
   );
@@ -1363,6 +1330,23 @@ function ProjectSpace() {
 }
 
 function ProjectBoard({ tasks }: { tasks: Task[] }) {
+  type BoardColumnKey="todo"|"active"|"review"|"waiting"|"done";
+  const {openTask,setTasks,notify}=useHub();
+  const [draggedTaskId,setDraggedTaskId]=useState<string|null>(null);
+  const [hoveredColumn,setHoveredColumn]=useState<BoardColumnKey|null>(null);
+  const [returnTask,setReturnTask]=useState<Task|null>(null);
+  const [returnReason,setReturnReason]=useState("");
+  const [busy,setBusy]=useState(false);
+  const columns:{key:BoardColumnKey;label:string;hint:string;statuses:TaskStatus[]}[]=[{key:"todo",label:"待开始",hint:"接收或尚未启动",statuses:["todo"]},{key:"active",label:"进行中",hint:"服务端执行状态",statuses:["progress","ai"]},{key:"review",label:"待确认 / 验收",hint:"等待人工判断",statuses:["confirm","review"]},{key:"waiting",label:"阻塞 / 等待",hint:"从任务详情管理依赖",statuses:["blocked","external"]},{key:"done",label:"已完成",hint:"人工验收后归档",statuses:["done"]}];
+  const taskColumn=(task:Task):BoardColumnKey=>columns.find((column)=>column.statuses.includes(task.status))?.key||"todo";
+  const actionFor=(task:Task,target:BoardColumnKey):"ACCEPT"|"START"|"APPROVE"|"RETURN"|"RESUME_EXTERNAL"|null=>{if(target==="active"&&task.apiStatus==="PENDING_OWNER_CONFIRMATION")return"ACCEPT";if(target==="active"&&task.apiStatus==="TODO")return"START";if(target==="active"&&task.apiStatus==="WAITING_EXTERNAL")return"RESUME_EXTERNAL";if(target==="active"&&task.apiStatus==="WAITING_REVIEW")return"RETURN";if(target==="done"&&task.apiStatus==="WAITING_REVIEW")return"APPROVE";return null;};
+  const runAction=async(task:Task,action:"ACCEPT"|"START"|"APPROVE"|"RETURN"|"RESUME_EXTERNAL",reason="")=>{setBusy(true);try{const result=await performTaskAction(task.id,action,{expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason});setTasks((items)=>items.map((item)=>item.id===task.id?taskFromApi(result.task):item));notify(action==="APPROVE"?"任务已验收完成":action==="RETURN"?"任务已退回修改":"任务状态已由服务端更新");return true;}catch(cause){notify(cause instanceof ApiError?cause.message:"状态更新失败，请刷新后重试");return false;}finally{setBusy(false);}};
+  const requestMove=(task:Task,target:BoardColumnKey)=>{const action=actionFor(task,target);if(action==="RETURN"){setReturnTask(task);setReturnReason("");return;}if(action){void runAction(task,action);return;}if(taskColumn(task)!==target){notify(target==="review"?"提交结果或确认 AI 草稿需要完整内容，请进入任务详情":"该状态没有合法的服务端动作，请进入任务详情处理");openTask(task);}};
+  const draggedTask=tasks.find((task)=>task.id===draggedTaskId)||null;
+  return <div className="project-board-wrap"><div className="kanban-interaction-guide"><span><GripVertical size={15}/>仅允许服务端状态机支持的拖动</span><span><ShieldCheck size={15}/>提交、等待外部和 AI 确认请进入任务详情</span></div><div className="board-scroll"><div className="kanban-board">{columns.map((column)=>{const columnTasks=tasks.filter((task)=>column.statuses.includes(task.status));const activeDrop=hoveredColumn===column.key&&draggedTask;const validDrop=Boolean(activeDrop&&actionFor(activeDrop,column.key));return <section className={`kanban-column${activeDrop?validDrop?" is-valid-drop":" is-invalid-drop":""}${draggedTask?" is-dragging-board":""}`} key={column.key} onDragEnter={()=>setHoveredColumn(column.key)} onDragOver={(event)=>{event.preventDefault();event.dataTransfer.dropEffect=validDrop?"move":"none";}} onDrop={(event)=>{event.preventDefault();const task=tasks.find((item)=>item.id===(draggedTaskId||event.dataTransfer.getData("text/plain")));setDraggedTaskId(null);setHoveredColumn(null);if(task)requestMove(task,column.key);}}><header><div><strong>{column.label}</strong><small>{column.hint}</small></div><span>{columnTasks.length}</span></header><div className="kanban-list">{columnTasks.map((task)=><article className={`kanban-card${draggedTaskId===task.id?" is-dragging":""}`} key={task.id}><div className="kanban-card-top"><span className={"priority-dot "+task.priority}/><div><StatusPill status={task.status}/>{task.status!=="done"&&<button className="kanban-drag-handle" draggable={!busy} aria-label={`流转任务：${task.title}`} title="只允许合法服务端动作" onDragStart={(event)=>{setDraggedTaskId(task.id);event.dataTransfer.setData("text/plain",task.id);}} onDragEnd={()=>{setDraggedTaskId(null);setHoveredColumn(null);}}><GripVertical size={15}/></button>}</div></div><button className="kanban-card-open" onClick={()=>openTask(task)}><strong>{task.title}</strong><small>{task.nextAction}</small></button><footer><ModePill mode={task.mode}/><span>{task.due}</span></footer></article>)}{!columnTasks.length&&<div className="kanban-empty">暂无任务</div>}</div></section>;})}</div></div>{returnTask&&<AppModal title="退回修改" subtitle="原因将写入服务端状态历史。" onClose={()=>setReturnTask(null)} size="md"><form className="form-stack" onSubmit={async(event)=>{event.preventDefault();if(returnReason.trim()&&await runAction(returnTask,"RETURN",returnReason.trim()))setReturnTask(null);}}><label><span>退回原因</span><textarea autoFocus value={returnReason} onChange={(event)=>setReturnReason(event.target.value)} placeholder="说明未通过的验收标准"/></label><footer className="modal-actions"><button type="button" className="button secondary" onClick={()=>setReturnTask(null)}>取消</button><button className="button primary" disabled={busy||!returnReason.trim()}>{busy?"处理中…":"确认退回"}</button></footer></form></AppModal>}</div>;
+}
+
+function LegacyProjectBoard({ tasks }: { tasks: Task[] }) {
   type BoardColumnKey = "todo" | "active" | "review" | "waiting" | "done";
   const { openTask, setTasks, notify } = useHub();
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -1509,108 +1493,70 @@ function ProjectBoard({ tasks }: { tasks: Task[] }) {
 }
 
 function ProjectChat({ project }: { project: Project }) {
-  const { notify, openCandidate, openPreview } = useHub();
-  const location = useLocation();
-  const launchPrompt = new URLSearchParams(location.search).get("prompt") || "";
+  const { tasks, setCandidates, notify, openCandidate } = useHub();
+  const navigate = useNavigate();
+  const [conversations, setConversations] = useState<ApiProjectConversation[]>([]);
+  const [activeId, setActiveId] = useState("");
+  const [messages, setMessages] = useState<ApiProjectChatMessage[]>([]);
+  const [members, setMembers] = useState<ApiProjectMember[]>([]);
   const [text, setText] = useState("");
-  const [activeSession, setActiveSession] = useState(() => launchPrompt ? "专家协作 · 新对话" : "项目风险与下一步");
-  const [messages, setMessages] = useState<{ role: "user" | "ai" | "system"; text: string }[]>(() => launchPrompt ? [
-    { role: "user", text: launchPrompt },
-    { role: "ai", text: `已进入「${project.name}」项目协作。我会让所选专家基于本项目的任务、会议和资产开始分析，并在这里返回结果。` },
-  ] : [
-    { role: "user", text: "帮我总结一下这个项目现在卡在哪里？" },
-    { role: "ai", text: "当前主要风险是首页核心卖点仍待客户确认；建议先推进不依赖客户反馈的信息架构，并把卖点确认设为明天的外部等待提醒。" },
-  ]);
-  const [members, setMembers] = useState(() => Array.from(new Set([project.owner, "曹玉祥"])));
-  const [memberPanel, setMemberPanel] = useState(false);
-  const [chatContexts, setChatContexts] = useState<ChatContextItem[]>([]);
-  const [thinking, setThinking] = useState(false);
-  const inviteMember = (name: string) => {
-    if (members.includes(name)) return;
-    setMembers((items) => [...items, name]);
-    setMessages((items) => [...items, { role: "system", text: name + " 已加入本项目 AI 协作 · 可查看完整历史并继续向 AI 提问" }]);
-    notify("已邀请 " + name + " 加入「" + project.name + "」项目 AI 协作");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const projectTasks = tasks.filter((task)=>task.projectId===project.id);
+  const activeConversation = conversations.find((item)=>item.id===activeId);
+
+  const openConversation = async (conversationId:string) => {
+    setActiveId(conversationId); setLoading(true); setError("");
+    try { setMessages(await fetchProjectChatMessages(conversationId)); }
+    catch (reason) { setError(reason instanceof ApiError?reason.message:"无法读取对话"); }
+    finally { setLoading(false); }
   };
-  const send = () => {
-    if (!text.trim() || thinking) return;
-    const message = text;
-    setMessages((items) => [...items, { role: "user", text: message }]);
-    setText("");
-    setThinking(true);
-    window.setTimeout(() => {
-      setMessages((items) => [...items, { role: "ai", text: "我已结合项目任务、会议和资产生成建议，并准备了 1 个候选任务，确认后可以进入任务池。" }]);
-      setThinking(false);
-    }, 1050);
+  useEffect(()=>{let active=true;setLoading(true);Promise.all([fetchProjectConversations(project.id),fetchProjectMembers(project.id)]).then(async([rows,memberRows])=>{if(!active)return;setConversations(rows);setMembers(memberRows);if(rows[0]){setActiveId(rows[0].id);setMessages(await fetchProjectChatMessages(rows[0].id));}}).catch((reason)=>{if(active)setError(reason instanceof ApiError?reason.message:"无法读取项目 AI 协作");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[project.id]);
+  const startSession = async () => {
+    setBusy(true); setError("");
+    try { const created=await createProjectConversation(project.id); setConversations((items)=>[created,...items]); setActiveId(created.id); setMessages([]); notify("项目对话已创建并保存"); }
+    catch(reason){setError(reason instanceof ApiError?reason.message:"创建对话失败");}
+    finally{setBusy(false);}
   };
-  const startSession = () => {
-    setActiveSession("未命名项目对话");
-    setMessages([{ role: "ai", text: "新对话已连接当前项目上下文。你希望先分析任务、风险、会议还是资产？" }]);
-    notify("已新建项目对话");
+  const send = async () => {
+    const content=text.trim(); if(!content||busy)return; setBusy(true);setError("");
+    try { let conversationId=activeId;if(!conversationId){const created=await createProjectConversation(project.id);conversationId=created.id;setConversations((items)=>[created,...items]);setActiveId(created.id);}const result=await sendProjectChatMessage(conversationId,content);setMessages((items)=>[...items.filter((item)=>item.id!==result.user_message.id&&item.id!==result.assistant_message.id),result.user_message,result.assistant_message]);setText("");setConversations(await fetchProjectConversations(project.id)); }
+    catch(reason){setError(reason instanceof ApiError?reason.message:"消息发送失败，输入内容已保留");}
+    finally{setBusy(false);}
   };
-  return (
-    <div className="project-chat-layout">
-      <aside className="chat-sessions panel">
-        <div className="panel-title-row"><h2>项目对话</h2><button className="icon-button" onClick={startSession} aria-label="新建项目对话"><Plus size={16}/></button></div>
-        {["项目风险与下一步", "首页信息架构讨论", "会议行动项整理"].map((name, index) => <button className={activeSession === name ? "active" : ""} key={name} onClick={() => {setActiveSession(name); setMessages([{role:"ai",text:"已打开「" + name + "」的历史记录。你可以继续基于同一项目上下文向 AI 提问。"}]);}}><MessageSquareText size={15}/><span><strong>{name}</strong><small>{index === 0 ? "刚刚" : index + 1 + " 天前"}</small></span></button>)}
-      </aside>
-      <section className="project-chat-main panel">
-        <header>
-          <AssistantLifeOrb size="small" />
-          <div><strong>{project.name} · 项目 AI 协作</strong><small>仅限本项目 · 已连接 6 个任务、4 份资产、2 次会议</small></div>
-          <div className="project-chat-header-actions">
-            <div className="avatar-stack compact">{members.slice(0, 3).map((name) => <Avatar name={name} size="sm" key={name}/>)}</div>
-            <button className="button primary compact" onClick={() => setMemberPanel(true)}><UserPlus size={15}/> 邀请项目成员</button>
-          </div>
-        </header>
-        <div className="chat-messages">
-          <div className="project-scope-note"><FolderKanban size={15}/><span><strong>项目边界已锁定</strong>AI 只读取「{project.name}」中的任务、会议、资产和项目沟通，不会读取你的其他项目或个人工作。</span></div>
-          {messages.map((message, index) => message.role === "system" ? <div className="chat-system-message" key={index}><Users size={13}/>{message.text}</div> : <div className={"chat-message " + message.role} key={index}>{message.role === "ai" && <AssistantLifeOrb size="tiny" state="active" />}<p>{message.text}</p></div>)}
-          {thinking && <div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking" /><div className="ai-thinking-copy"><strong>正在理解项目上下文</strong><span className="thinking-dots"><i/><i/><i/></span><small>连接任务、会议与资产...</small></div></div>}
-          <div className="inline-candidate">
-            <span><Sparkles size={16}/></span>
-            <div><small>候选任务</small><strong>明天跟进客户确认首页核心卖点</strong><p>建议负责人：{project.owner} · 截止：明天 17:00</p></div>
-            <button className="button primary compact" onClick={() => openCandidate({id:"c-project-" + Date.now(),title:"明天跟进客户确认首页核心卖点",source:"AI Chat",sourceDetail:project.name + " · 项目对话",confidence:91,suggestedOwner:project.owner,suggestedProject:project.name,due:"明天 17:00",reason:"项目风险分析中识别到明确的外部确认对象、负责人和时间要求。"})}>审核创建</button>
-          </div>
-          <div className="project-handoff-card">
-            <span className="handoff-file-icon"><FileText size={18}/></span>
-            <div><small>项目交付物 · 可交接</small><strong>{project.name} 开发说明.md</strong><p>已整理目标、页面范围、状态说明与验收标准。邀请研发后，对方可先阅读完整 AI 历史，再直接向 AI 追问实现细节。</p></div>
-            <div className="handoff-actions"><button className="button secondary compact" onClick={() => openPreview({eyebrow:"项目交付物",title:project.name + " 开发说明.md",description:"这份说明由当前项目 AI 对话持续整理，并与本项目任务、会议和资产保持关联。",items:[{title:"产品目标与范围",detail:"明确本次交付包含与不包含的内容"},{title:"页面、状态与交互",detail:"覆盖正常、加载、空白、失败和恢复路径"},{title:"研发验收标准",detail:"按任务节点逐项确认，不依赖聊天口头同步"}],note:"邀请成员后，对方可以查看生成这份文档的完整 AI 对话。",primaryLabel:"返回项目 AI 协作"})}>预览说明</button><button className="button primary compact" onClick={() => setMemberPanel(true)}><UserPlus size={15}/> 邀请成员接手</button></div>
-          </div>
-        </div>
-        <form className="chat-composer" onSubmit={(event) => {event.preventDefault(); send();}}>
-          <ChatContextChips items={chatContexts} onChange={setChatContexts}/>
-          <ChatContextPicker project={project} selected={chatContexts} onChange={setChatContexts}/>
-          <input value={text} onChange={(event) => setText(event.target.value)} placeholder="询问项目进展，或让 AI 执行一个动作..." />
-          <button className="send-button" aria-label="发送" disabled={!text.trim() || thinking}><Send size={16}/></button>
-        </form>
-      </section>
-      <aside className="chat-context panel">
-        <h2>项目工作范围</h2>
-        <div className="context-section"><span>协作成员</span><div className="avatar-stack">{members.map((name) => <Avatar name={name} key={name}/>)}</div><button className="text-button" onClick={() => setMemberPanel(true)}>管理成员 <ChevronRight size={14}/></button><p>成员共享本项目 AI 历史，并各自继续向 AI 提问。</p></div>
-        <div className="context-section"><span>已连接能力</span><strong><WandSparkles size={15}/> 产品策略专家</strong><strong><Boxes size={15}/> 客户需求分析</strong></div>
-        <div className="context-section"><span>项目资料</span><p>6 个项目任务</p><p>4 份项目资产</p><p>2 次项目会议</p></div>
-        <div className="project-boundary-card"><CheckCircle2 size={16}/><p><strong>不会跨出本项目</strong><span>个人待办和其他项目不会进入这段对话。</span></p></div>
-      </aside>
-      {memberPanel && <ChatMemberPanel members={members} onInvite={inviteMember} onClose={() => setMemberPanel(false)} title={project.name + " 协作成员"} accessLabel="已加入项目 AI 协作" inviteLabel="邀请成员接手项目" footerText="被邀请人可以查看本项目完整 AI 历史、关联任务与交付物，并继续向 AI 询问实现细节。" />}
-    </div>
-  );
+  const extractCandidate = async (message:ApiProjectChatMessage) => {
+    setBusy(true);setError("");
+    try {const result=await createCandidateExtraction({project_id:project.id,source_type:"AI_CHAT",title:activeConversation?.title||"项目 AI 对话",content:message.content});const active=result.candidates.filter((item)=>item.status==="ACTIVE");setCandidates((items)=>[...active,...items.filter((item)=>!active.some((candidate)=>candidate.id===item.id))]);if(active[0])openCandidate(active[0]);notify(`已保存来源快照并生成 ${active.length} 个候选`);}
+    catch(reason){setError(reason instanceof ApiError?reason.message:"候选提取失败");}
+    finally{setBusy(false);}
+  };
+  return <div className="project-chat-layout">
+    <aside className="chat-sessions panel"><div className="panel-title-row"><h2>项目对话</h2><button className="icon-button" disabled={busy} onClick={startSession} aria-label="新建项目对话"><Plus size={16}/></button></div>{conversations.map((item)=><button className={activeId===item.id?"active":""} key={item.id} onClick={()=>void openConversation(item.id)}><MessageSquareText size={15}/><span><strong>{item.title}</strong><small>{item.message_count} 条消息 · {item.created_by_name}</small></span></button>)}{!conversations.length&&!loading&&<p className="preview-boundary-note">还没有项目对话，点击右上角新建。</p>}</aside>
+    <section className="project-chat-main panel"><header><AssistantLifeOrb size="small"/><div><strong>{project.name} · 项目 AI 协作</strong><small>真实持久化 · 当前只连接 {projectTasks.length} 个项目任务</small></div><div className="project-chat-header-actions"><div className="avatar-stack compact">{members.slice(0,3).map((member)=><Avatar name={member.name} size="sm" key={member.id}/>)}</div><button className="button secondary compact" onClick={()=>navigate("/teams")}><Users size={15}/> 管理项目访问</button></div></header>
+      <div className="chat-messages"><div className="project-scope-note"><FolderKanban size={15}/><span><strong>项目边界已锁定</strong>服务端只读取「{project.name}」中当前用户有权查看的任务；会议和资产尚未接入，不会被宣称为上下文。</span></div>{loading&&<div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking"/><div className="ai-thinking-copy"><strong>正在读取真实历史</strong><small>从服务端加载项目会话…</small></div></div>}{!loading&&messages.map((message)=><div className={"chat-message "+(message.role==="ASSISTANT"?"ai":"user")} key={message.id}>{message.role==="ASSISTANT"&&<AssistantLifeOrb size="tiny" state="active"/>}<div><p>{message.content}</p>{message.role==="ASSISTANT"&&<small className="chat-grounding-meta"><strong>{message.execution_mode}</strong> · 引用了 {message.context_task_titles.length} 个真实任务 · Prompt {message.prompt_version}</small>}{message.role==="ASSISTANT"&&<button className="button secondary compact" disabled={busy} onClick={()=>void extractCandidate(message)}><Sparkles size={14}/> 从回答提取候选</button>}</div></div>)}{!loading&&!messages.length&&<EmptyState icon={<MessageSquareText/>} title="开始一段真实项目对话" description="消息会保存到服务端，并且只读取当前项目的真实任务。"/>}{busy&&<div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking"/><div className="ai-thinking-copy"><strong>正在处理</strong><small>生成结果前不会显示成功状态…</small></div></div>}{error&&<p className="login-error">{error}</p>}</div>
+      <form className="chat-composer" onSubmit={(event)=>{event.preventDefault();void send();}}><input value={text} onChange={(event)=>setText(event.target.value)} placeholder="基于当前项目真实任务提问…"/><button className="send-button" aria-label="发送" disabled={!text.trim()||busy}><Send size={16}/></button></form>
+    </section>
+    <aside className="chat-context panel"><h2>项目工作范围</h2><div className="context-section"><span>可访问成员</span><div className="avatar-stack">{members.map((member)=><Avatar name={member.name} key={member.id}/>)}</div><p>访问权来自项目成员关系，由服务端校验。</p></div><div className="context-section"><span>已连接数据</span><strong><ListTodo size={15}/>{projectTasks.length} 个项目任务</strong><p>项目会议：暂未接入</p><p>项目资产：暂未接入</p></div><div className="project-boundary-card"><CheckCircle2 size={16}/><p><strong>不会跨出本项目</strong><span>每条 AI 回答都记录模式、Prompt 和引用任务。</span></p></div></aside>
+  </div>;
 }
 
 function TaskPool() {
-  const { tasks, candidates, setTasks, notify, openTask, openCandidate } = useHub();
+  const { tasks, candidates, projects, openTask, openCandidate } = useHub();
   const { user } = useAuth();
+  const memberProfiles = useActiveTeamMemberProfiles();
   const location = useLocation();
   const navigate = useNavigate();
   const decisionOnly = new URLSearchParams(location.search).get("focus") === "decisions";
-  const [tab, setTab] = useState("我的任务");
-  const [claimed, setClaimed] = useState<string[]>([]);
+  const requestedTab = new URLSearchParams(location.search).get("tab");
+  const [tab, setTab] = useState(requestedTab === "candidates" ? "候选任务" : "我的任务");
   const [statusFilter, setStatusFilter] = useState("全部状态");
   const [query, setQuery] = useState("");
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const filteredTasks = tasks.filter((task) => {
     const matchesQuery = task.title.includes(query) || task.project.includes(query);
-    const matchesOwner = !ownedOnly || task.owner === "廖婉琛";
+    const matchesOwner = !ownedOnly || task.owner === user.name;
     const matchesDecision = !decisionOnly
       || (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && task.owner === user.name)
       || (task.apiStatus === "WAITING_REVIEW" && task.reviewer === user.name)
@@ -1620,16 +1566,11 @@ function TaskPool() {
   const activeTasks = filteredTasks.filter((task) => task.status !== "done" && (statusFilter === "全部状态" || statusMeta[task.status].label === statusFilter));
   const completedTasks = filteredTasks.filter((task) => task.status === "done");
   const completedCount = tasks.filter((task) => task.status === "done").length;
-  const claim = (task: Task) => {
-    setClaimed((ids) => [...ids, task.id]);
-    setTasks((items) => [{ ...task, owner: "廖婉琛", source: "开放任务池" }, ...items]);
-    notify("任务已认领，已加入「我的任务」");
-  };
   return (
     <>
-      <PageHeader title="任务池" description="进行中任务、已完成归档、开放认领和 AI 候选任务在一个地方完成流转。" action={<button className="button primary" onClick={() => setCreateOpen(true)}><Plus size={16}/> 新建任务</button>} />
+      <PageHeader title="任务池" description="正式任务与 AI 候选均来自服务端；候选必须人工确认后才会进入任务闭环。" action={<button className="button primary" onClick={() => setCreateOpen(true)}><Plus size={16}/> 新建任务</button>} />
       <div className="tab-bar">
-        {["我的任务", "开放任务", "候选任务", "已完成任务"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "候选任务" && <span>{candidates.length}</span>}{item === "已完成任务" && <span>{completedCount}</span>}</button>)}
+        {["我的任务", "候选任务", "已完成任务"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "候选任务" && <span>{candidates.length}</span>}{item === "已完成任务" && <span>{completedCount}</span>}</button>)}
       </div>
       {(tab === "我的任务" || tab === "已完成任务") && (
         <section className="panel table-panel">
@@ -1642,26 +1583,14 @@ function TaskPool() {
           <TaskTable tasks={tab === "已完成任务" ? completedTasks : activeTasks} onOpen={openTask} />
         </section>
       )}
-      {tab === "开放任务" && (
-        <div className="open-task-grid">
-          {(demoDataEnabled ? openTasks : []).map((task) => (
-            <article className="open-task-card" key={task.id}>
-              <div><StatusPill status="todo"/><span className="points-tag">+8 贡献分</span></div>
-              <h3>{task.title}</h3><p>{task.description}</p>
-              <div className="open-task-meta"><span><BriefcaseBusiness size={14}/>{task.project}</span><span><Clock3 size={14}/>{task.due}</span></div>
-              <button disabled={claimed.includes(task.id)} className={"button full " + (claimed.includes(task.id) ? "disabled" : "primary")} onClick={() => claim(task)}>{claimed.includes(task.id) ? <><Check size={16}/> 已认领</> : "认领任务"}</button>
-            </article>
-          ))}
-        </div>
-      )}
       {tab === "候选任务" && (
         <section className="candidate-review-list">
           <div className="candidate-info-banner"><Sparkles size={20}/><div><strong>AI 只负责发现，正式创建前由你确认</strong><span>检查负责人、截止时间、项目与交付物，避免错误任务进入团队。</span></div></div>
           {candidates.map((candidate) => (
             <button className="candidate-wide" key={candidate.id} onClick={() => openCandidate(candidate)}>
               <span className="source-icon large"><Sparkles size={18}/></span>
-              <div className="candidate-wide-main"><span>{candidate.source} · {candidate.sourceDetail}</span><strong>{candidate.title}</strong><small>{candidate.reason}</small></div>
-              <div className="candidate-suggestion"><span>建议负责人</span><strong>{candidate.suggestedOwner}</strong></div>
+              <div className="candidate-wide-main"><span>{projects.find((project)=>project.id===candidate.project_id)?.name || "项目候选"} · 服务端快照</span><strong>{candidate.title}</strong><small>{candidate.evidence}</small></div>
+              <div className="candidate-suggestion"><span>建议负责人</span><strong>{memberProfiles.find((member)=>member.id===candidate.owner_id)?.name || "待指定"}</strong></div>
               <div className="confidence"><span>{candidate.confidence}%</span><small>置信度</small></div>
               <span className="button primary compact">审核</span>
             </button>
@@ -1693,7 +1622,13 @@ function TaskTable({ tasks, onOpen }: { tasks: Task[]; onOpen: (task: Task) => v
   );
 }
 
-function HelpCenter() {
+function PreviewOnlyPage({title,description,items}:{title:string;description:string;items:string[]}) {
+  return <><PageHeader title={title} description={description}/><section className="panel tab-panel"><div className="preview-boundary-note"><AlertCircle size={18}/><p><strong>预览模块，写操作暂未开放</strong><small>该模块尚无服务端持久化与权限接口，因此不会显示本地假数据或成功提示。</small></p></div><div className="flow-preview-list">{items.map((item,index)=><div key={item}><span>{index+1}</span><p><strong>{item}</strong><small>完成后才会开放对应入口</small></p></div>)}</div></section></>;
+}
+
+function HelpCenter(){return <PreviewOnlyPage title="智能求助" description="当前为能力边界预览；发布、转专家和知识沉淀尚未接入服务端。" items={["求助记录持久化","专家转交与权限校验","解决结果和知识沉淀"]}/>;}
+
+function LegacyHelpCenter() {
   const { helps, setHelps, notify, setAssets, setContributions } = useHub();
   const [createOpen, setCreateOpen] = useState(false);
   const update = (id: string, patch: Partial<HelpRequest>) => setHelps((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
@@ -1728,7 +1663,9 @@ function HelpCenter() {
   );
 }
 
-function KnowledgeSpace() {
+function KnowledgeSpace(){return <PreviewOnlyPage title="知识空间" description="当前为只读预览；新建、编辑、自动保存和发布入口已关闭。" items={["知识页面与版本模型","自动保存和冲突处理","发布快照与权限"]}/>;}
+
+function LegacyKnowledgeSpace() {
   const { knowledgePages, setKnowledgePages, assets, setAssets, notify, openPreview, openAsset } = useHub();
   const { user } = useAuth();
   const teamMemberProfiles = useActiveTeamMemberProfiles();
@@ -1922,7 +1859,9 @@ function formatFileSize(size: number) {
   return Math.max(1, Math.round(size / 1024)) + " KB";
 }
 
-function AssetLibrary() {
+function AssetLibrary(){return <PreviewOnlyPage title="资产库" description="当前为只读预览；上传、文件夹和打开原文件入口已关闭。" items={["资产元数据与项目范围","上传下载和存储","访问权限与审计"]}/>;}
+
+function LegacyAssetLibrary() {
   const { assets, setAssets, notify } = useHub();
   const [folders, setFolders] = useState<AssetFolder[]>(initialAssetFolders);
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -2058,7 +1997,9 @@ function AssetTable({ assets, onSelect }: { assets: Asset[]; onSelect?: (asset: 
   );
 }
 
-function CapabilityLibrary() {
+function CapabilityLibrary(){return <PreviewOnlyPage title="能力库" description="当前为只读预览；创建 Skill、运行和连接器管理入口已关闭。" items={["Skill 定义与版本","真实运行记录","连接器授权状态"]}/>;}
+
+function LegacyCapabilityLibrary() {
   const { startChatWith, notify, openPreview } = useHub();
   const [tab, setTab] = useState("专家团");
   const [runningSkill, setRunningSkill] = useState<string | null>(null);
@@ -2143,6 +2084,30 @@ function ContributionPage() {
 }
 
 function AgentCenter() {
+  const { tasks, openTask } = useHub();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const requestedRunId = new URLSearchParams(location.search).get("run") || "";
+  const [runs,setRuns]=useState<ApiAgentRun[]>([]);
+  const [selectedId,setSelectedId]=useState(requestedRunId);
+  const [filter,setFilter]=useState<"all"|"running"|"confirm"|"done"|"failed">("all");
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const load=()=>{setLoading(true);setError("");fetchAllAgentRuns().then(setRuns).catch((reason)=>setError(reason instanceof ApiError?reason.message:"无法读取 AI 运行记录")).finally(()=>setLoading(false));};
+  useEffect(load,[]);
+  useEffect(()=>{if(requestedRunId)setSelectedId(requestedRunId);},[requestedRunId]);
+  const taskFor=(run:ApiAgentRun)=>tasks.find((task)=>task.id===run.task_id);
+  const category=(run:ApiAgentRun):"running"|"confirm"|"done"|"failed"=>run.status==="FAILED"||run.status==="CANCELED"||run.status==="NEEDS_INPUT"?"failed":run.status==="QUEUED"||run.status==="RUNNING"?"running":taskFor(run)?.apiStatus==="WAITING_HUMAN_CONFIRMATION"?"confirm":"done";
+  const label=(run:ApiAgentRun)=>category(run)==="running"?"执行中":category(run)==="confirm"?"待人工确认":category(run)==="failed"?"执行异常":"结果已进入任务流程";
+  const visible=filter==="all"?runs:runs.filter((run)=>category(run)===filter);
+  const selected=runs.find((run)=>run.id===selectedId);
+  const formatTime=(value:string|null)=>value?new Intl.DateTimeFormat("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value)):"未记录";
+  if(selected){const task=taskFor(selected);return <div className="agent-run-detail-page"><header className="agent-run-detail-header panel"><button className="task-detail-back" onClick={()=>{setSelectedId("");navigate("/agent",{replace:true});}}><ArrowLeft size={16}/>返回执行中心</button><div><span className="section-kicker">REAL AGENT RUN · {selected.id}</span><h1>{selected.task_title}</h1><p>{selected.project_name} · Prompt {selected.prompt_version}</p></div><div className="agent-run-header-actions"><span className={"agent-state-badge "+category(selected)}>{label(selected)}</span>{task&&<button className="button primary compact" onClick={()=>openTask(task)}>打开关联任务</button>}</div></header><div className="agent-run-detail-grid"><section className="agent-run-workspace panel"><div className={"ai-mode-banner "+(selected.execution_mode||"mock").toLowerCase()}><Bot size={17}/><span><strong>{selected.execution_mode||"未执行"}</strong><small>{selected.degraded?`降级原因：${selected.fallback_reason||"未知"}`:`服务端真实记录 · 尝试 ${selected.attempt_count}/${selected.max_attempts}`}</small></span></div><div className="agent-output"><div className="panel-title-row"><div><h3>运行结果</h3><p>这是服务端保存的原始草稿，不显示无法证明的模拟进度。</p></div></div><article><pre>{selected.output_text||selected.error_message||"运行尚未产生输出"}</pre></article></div></section><aside className="agent-run-context panel"><h2>运行事实</h2><div className="context-section"><span>请求人</span><p>{selected.requested_by_name}</p></div><div className="context-section"><span>执行时间</span><p>开始：{formatTime(selected.started_at)}</p><p>结束：{formatTime(selected.finished_at)}</p></div><div className="context-section"><span>状态</span><p>{selected.status}</p><p>{selected.execution_mode||"未执行"}</p></div><div className="project-boundary-card"><CheckCircle2 size={16}/><p><strong>真实运行记录</strong><span>刷新、换页面或换有权账号后读取同一 Run ID。</span></p></div></aside></div></div>;}
+  const tabs:[typeof filter,string][]=[["all","全部"],["running","执行中"],["confirm","待确认"],["done","已进入任务流程"],["failed","异常"]];
+  return <div className="agent-center-overview"><PageHeader title="AI 执行中心" description="直接读取服务端 AgentRun；状态、模式和产物不再由任务卡片推导。" action={<button className="button secondary" disabled={loading} onClick={load}><Activity size={16}/>{loading?"正在刷新…":"刷新运行记录"}</button>}/><section className="agent-summary-strip"><div><span className="metric-icon cyan"><Bot size={18}/></span><p><small>执行中</small><strong>{runs.filter((run)=>category(run)==="running").length}</strong></p></div><div><span className="metric-icon violet"><Inbox size={18}/></span><p><small>待人工确认</small><strong>{runs.filter((run)=>category(run)==="confirm").length}</strong></p></div><div><span className="metric-icon green"><CheckCircle2 size={18}/></span><p><small>已有结果</small><strong>{runs.filter((run)=>category(run)==="done").length}</strong></p></div></section><div className="agent-center-toolbar"><div className="agent-filter-tabs">{tabs.map(([key,name])=><button className={filter===key?"active":""} key={key} onClick={()=>setFilter(key)}>{name}<span>{key==="all"?runs.length:runs.filter((run)=>category(run)===key).length}</span></button>)}</div><span>停止与重试尚无服务端状态机，入口已关闭</span></div>{error&&<div className="hub-data-state error"><AlertCircle size={18}/>{error}<button onClick={load}>重试</button></div>}{!error&&visible.length?<section className="agent-run-overview-layout"><div className="agent-active-run-grid">{visible.map((run)=><button className={"agent-run-card "+category(run)} key={run.id} onClick={()=>setSelectedId(run.id)}><header><span className="agent-card-identity"><span className="agent-card-icon"><Bot size={19}/></span><span className="agent-card-name">{run.execution_mode||"未执行"}</span></span><span className={"agent-state-badge "+category(run)}>{label(run)}</span></header><div className="agent-card-title"><h2>{run.task_title}</h2><p>{run.project_name}</p></div><dl><div><dt>Run ID</dt><dd>{run.id}</dd></div><div><dt>产物</dt><dd>{run.output_text?"已保存真实草稿":"暂无产物"}</dd></div></dl><footer><span>{formatTime(run.finished_at||run.created_at)}</span><strong>查看真实记录 <ArrowRight size={15}/></strong></footer></button>)}</div></section>:!loading&&!error?<EmptyState icon={<Bot/>} title="这个分类下还没有真实运行" description="从任务详情启动 AI 后，服务端 Run 会出现在这里。"/>:null}</div>;
+}
+
+function LegacyAgentCenter() {
   const { tasks, setTasks, openTask, notify, openPreview } = useHub();
   const location = useLocation();
   const navigate = useNavigate();
@@ -2365,6 +2330,11 @@ function AgentAccess() {
 }
 
 function AiChat() {
+  const navigate=useNavigate();
+  return <div className="ai-workspace"><aside className="ai-sessions"><div className="ai-session-head"><strong>个人 AI</strong></div><p className="preview-boundary-note">个人全局会话尚未接入持久化与权限上下文。</p></aside><section className="ai-chat-main"><header><AssistantLifeOrb size="small"/><div><strong>个人 AI 助手 · 暂未开放</strong><small>不会使用固定回答冒充真实分析</small></div></header><div className="ai-chat-scroll"><div className="chat-welcome"><AssistantLifeOrb size="large"/><h1>请选择真实项目 AI 协作</h1><p>项目 AI 已接入服务端会话、权限校验和真实任务上下文；个人跨项目检索将在后续完成。</p><div><button onClick={()=>navigate("/projects")}>进入项目空间 <ArrowRight size={14}/></button></div></div></div><div className="ai-composer"><div className="ai-composer-surface"><div className="ai-composer-input-row"><textarea disabled placeholder="个人 AI 对话暂未开放"/><button className="send-button" disabled aria-label="暂未开放"><ArrowRight size={17}/></button></div></div><footer><span><AlertCircle size={13}/> 未实现的写入口已关闭</span></footer></div></section><aside className="ai-context-panel"><h2>当前能力边界</h2><div className="privacy-note"><CheckCircle2 size={16}/><p><strong>真实能力</strong><span>请在项目空间的“AI 协作”中基于项目任务提问。</span></p></div><div className="context-card"><span>尚未接入</span><p>跨项目任务、会议、资产、个人会话历史与临时共享。</p></div></aside></div>;
+}
+
+function LegacyAiChat() {
   const { openCandidate, notify, openPreview } = useHub();
   const location = useLocation();
   const navigate = useNavigate();
@@ -2477,7 +2447,7 @@ function AiChat() {
             {messages.map((message,index) => message.role === "system" ? <div className="chat-system-message" key={index}><Users size={13}/>{message.text}</div> : <div className={"chat-message " + message.role} key={index}>{message.role === "ai" ? <AssistantLifeOrb size="tiny" state="active" /> : null}<p>{message.text}</p></div>)}
             {thinking && <div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking" /><div className="ai-thinking-copy"><strong>正在组织回答</strong><span className="thinking-dots"><i/><i/><i/></span><small>读取项目、任务与最近会议...</small></div></div>}
             {streamingText && <div className="chat-message ai is-streaming"><AssistantLifeOrb size="tiny" state="active" /><p className="streaming-reply">{streamingText}<i className="stream-cursor" /></p></div>}
-            {generated && <div className="chat-candidate-card"><header><span><Sparkles size={16}/> AI 发现了一个候选任务</span><em>{generated.confidence}% 置信度</em></header><h3>{generated.title}</h3><p>{generated.reason}</p><div><span>项目：{generated.suggestedProject}</span><span>负责人：{generated.suggestedOwner}</span><span>截止：{generated.due}</span></div><footer><button className="button secondary compact" onClick={() => setGenerated(null)}>暂不创建</button><button className="button primary compact" onClick={() => openCandidate(generated)}>审核并创建</button></footer></div>}
+            {generated && <div className="chat-candidate-card"><header><span><Sparkles size={16}/> 旧演示候选</span><em>已停用</em></header><h3>{generated.title}</h3><p>旧个人对话不再允许创建任务，请使用项目 AI 的真实候选提取。</p><footer><button className="button secondary compact" onClick={() => setGenerated(null)}>关闭</button><button className="button primary compact" disabled>不可创建</button></footer></div>}
           </div>
         </div>
         <form className="ai-composer" onSubmit={(event) => {event.preventDefault(); send();}}>
@@ -2517,48 +2487,25 @@ function ChatMemberPanel({ members, onInvite, onClose, title = "会话成员", a
 }
 
 function NotificationPopover({ close }: { close: () => void }) {
-  const { notifications, setNotifications, tasks, openTask } = useHub();
-  const navigate = useNavigate();
-  const unreadCount = notifications.filter((item) => !item.read).length;
-  const openNotification = (notification: HubNotification) => {
-    setNotifications((items) => items.map((item) => item.id === notification.id ? { ...item, read: true } : item));
-    if (notification.taskId) {
-      const task = tasks.find((item) => item.id === notification.taskId);
-      if (task) openTask(task);
-    } else if (notification.route) {
-      navigate(notification.route);
-    }
-    close();
-  };
   return (
     <div className="notification-popover">
-      <header><span><strong>通知</strong>{unreadCount > 0 && <em>{unreadCount} 条未读</em>}</span><button onClick={close} aria-label="关闭通知"><X size={15}/></button></header>
-      <div className="notification-list">
-        {notifications.length ? notifications.slice(0, 6).map((notification) => (
-          <button className={notification.read ? "read" : ""} key={notification.id} onClick={() => openNotification(notification)}>
-            <span className={"notification-icon " + (notification.kind === "task" ? "blue" : notification.kind === "page" ? "green" : notification.kind === "chat" ? "violet" : notification.kind === "extraction" ? "cyan" : "amber")}>
-              {notification.kind === "task" ? <AtSign size={15}/> : notification.kind === "page" ? <BookOpen size={15}/> : notification.kind === "chat" ? <Users size={15}/> : notification.kind === "extraction" ? <Sparkles size={15}/> : <Bell size={15}/>}
-            </span>
-            <p><strong>{notification.title}</strong><span>{notification.detail}</span><small>{notification.createdAt}</small></p>
-            {!notification.read && <i />}
-          </button>
-        )) : <div className="notification-empty"><CheckCircle2 size={22}/><span>暂时没有新通知</span></div>}
-      </div>
-      <footer><button onClick={() => setNotifications((items) => items.map((item) => ({ ...item, read: true })))}>全部标为已读</button></footer>
+      <header><span><strong>通知</strong><em>暂未开放</em></span><button onClick={close} aria-label="关闭通知"><X size={15}/></button></header>
+      <div className="notification-list"><div className="notification-empty"><Bell size={22}/><span>通知读取与已读状态尚未接入服务端。</span></div></div>
     </div>
   );
 }
 
 function GlobalSearch({ onClose }: { onClose: () => void }) {
-  const { tasks, assets, openTask, openAsset } = useHub();
+  const { tasks, projects, openTask } = useHub();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const results = query ? tasks.filter((task) => task.title.includes(query)).slice(0,3) : tasks.slice(0,2);
+  const projectResults = (query ? projects.filter((project) => project.name.includes(query)) : projects).slice(0,2);
   return (
-    <AppModal title="全局搜索" subtitle="搜索任务、项目和资产，或让 AI 继续处理。" onClose={onClose} size="lg">
+    <AppModal title="全局搜索" subtitle="当前只搜索服务端返回的真实任务和项目。" onClose={onClose} size="lg">
       <label className="search-modal-input"><Search size={20}/><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词..." /><kbd>ESC</kbd></label>
-      <div className="search-results"><small>任务</small>{results.map((task) => <button key={task.id} onClick={() => {onClose(); openTask(task);}}><ListTodo size={17}/><span><strong>{task.title}</strong><small>{task.project}</small></span><StatusPill status={task.status}/></button>)}<small>资产</small>{assets.filter((asset) => !query || asset.title.includes(query)).slice(0,2).map((asset) => <button key={asset.id} onClick={() => {onClose();openAsset(asset);}}><FileText size={17}/><span><strong>{asset.title}</strong><small>{asset.scope}</small></span><ChevronRight size={15}/></button>)}</div>
-      <button className="ask-ai-search" onClick={() => {onClose();navigate("/ai?prompt=" + encodeURIComponent("搜索并总结：" + (query || "当前工作")));}}><Sparkles size={17}/><span>让 AI 搜索并总结「{query || "当前工作"}」</span><ArrowRight size={16}/></button>
+      <div className="search-results"><small>任务</small>{results.map((task) => <button key={task.id} onClick={() => {onClose(); openTask(task);}}><ListTodo size={17}/><span><strong>{task.title}</strong><small>{task.project}</small></span><StatusPill status={task.status}/></button>)}<small>项目</small>{projectResults.map((project) => <button key={project.id} onClick={() => {onClose();navigate(`/projects/${project.id}`);}}><FolderKanban size={17}/><span><strong>{project.name}</strong><small>真实项目空间</small></span><ChevronRight size={15}/></button>)}</div>
+      <button className="ask-ai-search" onClick={() => {onClose();navigate("/projects");}}><Sparkles size={17}/><span>需要 AI 分析？请选择项目后进入 AI 协作</span><ArrowRight size={16}/></button>
     </AppModal>
   );
 }
@@ -2608,37 +2555,50 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
         <div className="form-grid"><label><span>交付给 / 验收人</span><select value={form.reviewerId} onChange={(event) => setForm({...form,reviewerId:event.target.value})}>{members.map((member) => <option value={member.id} key={member.id}>{member.name}</option>)}</select></label><label><span>交付物</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})} placeholder="例如：信息架构 V2" /></label></div>
         {memberError && <p className="login-error">{memberError}</p>}
         <div className="form-grid"><label><span>截止时间</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI</option><option value="hybrid">人机协作</option></select></label></div>
-        <div className="ai-form-tip"><Sparkles size={17}/><span>创建后 AI 会根据项目上下文建议执行步骤、风险与参考资料。</span></div>
+        <div className="ai-form-tip"><Sparkles size={17}/><span>任务创建后可在详情页生成 AI 草稿；草稿必须人工确认，不会自动完成任务。</span></div>
         <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.title.trim()||!form.projectId||!form.ownerId||!form.reviewerId||busy}>{busy?"创建中…":"创建任务"}</button></footer>
       </form>
     </AppModal>
   );
 }
 
-function CandidateReview({ candidate, onClose }: { candidate: Candidate; onClose: () => void }) {
+function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onClose: () => void }) {
   const { projects, setTasks, setCandidates, notify } = useHub();
-  const teamMemberProfiles = useActiveTeamMemberProfiles();
-  const teamMembers = teamMemberProfiles.map((member) => member.name);
-  const suggestedProject = projects.find((project) => project.name === candidate.suggestedProject) || projects[0];
-  const initialOwner = teamMembers.includes(candidate.suggestedOwner) ? candidate.suggestedOwner : teamMembers[0] || "";
-  const [form, setForm] = useState({ title: candidate.title, owner: initialOwner, reviewer: teamMembers.find((name) => name !== initialOwner) || initialOwner, projectId: suggestedProject.id, due: candidate.due, mode: "hybrid" as ExecutionMode, deliverable: "可审核的工作结果" });
-  const create = () => {
-    const project = projects.find((item) => item.id === form.projectId)!;
-    setTasks((items) => [{ id: "t-" + Date.now(), title: form.title, projectId: project.id, project: project.name, owner: form.owner, collaborators: [], reviewer: form.reviewer, due: form.due, priority: "中", status: "todo", mode: form.mode, progress: 0, description: candidate.reason, deliverable: form.deliverable, source: candidate.source + " · " + candidate.sourceDetail, nextAction: "负责人确认后开始执行" }, ...items]);
-    setCandidates((items) => items.filter((item) => item.id !== candidate.id));
-    notify("候选任务已确认并正式创建");
-    onClose();
+  const teamMembers = useActiveTeamMemberProfiles();
+  const [form, setForm] = useState({ title:candidate.title, ownerId:candidate.owner_id || "", reviewerId:candidate.reviewer_id || "", due:candidate.due_at ? candidate.due_at.slice(0,16) : "", deliverable:candidate.deliverable, description:candidate.description });
+  const [busy, setBusy] = useState(false);
+  const project = projects.find((item) => item.id === candidate.project_id);
+  const create = async () => {
+    if (!form.title.trim() || !form.deliverable.trim() || !form.ownerId || !form.reviewerId) return;
+    setBusy(true);
+    try {
+      const updated = await updateCandidate(candidate.id,{expected_version:candidate.version,title:form.title.trim(),deliverable:form.deliverable.trim(),description:form.description.trim(),owner_id:form.ownerId,reviewer_id:form.reviewerId,due_at:form.due?new Date(form.due).toISOString():null});
+      const result = await confirmCandidate(updated.id,updated.version);
+      setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);
+      setCandidates((items)=>items.filter((item)=>item.id!==candidate.id));
+      notify("候选已由服务端确认并创建正式任务");
+      onClose();
+    } catch (reason) {
+      notify(reason instanceof ApiError ? reason.message : "候选确认失败，请重试");
+    } finally { setBusy(false); }
+  };
+  const ignore = async () => {
+    setBusy(true);
+    try { await ignoreCandidate(candidate.id); setCandidates((items)=>items.filter((item)=>item.id!==candidate.id)); notify("候选已忽略并保存"); onClose(); }
+    catch (reason) { notify(reason instanceof ApiError ? reason.message : "忽略失败，请重试"); }
+    finally { setBusy(false); }
   };
   return (
-    <AppModal title="审核候选任务" subtitle="AI 已完成提取，但正式进入团队前仍由你确认。" onClose={onClose} size="lg">
-      <div className="candidate-source-box"><span className="source-icon large"><Sparkles size={18}/></span><div><span>{candidate.source} · {candidate.sourceDetail}</span><strong>{candidate.confidence}% 置信度</strong><p>{candidate.reason}</p></div></div>
+    <AppModal title="审核候选任务" subtitle="候选来自服务端快照；确认后由服务端创建任务并记录审计。" onClose={onClose} size="lg">
+      <div className="candidate-source-box"><span className="source-icon large"><Sparkles size={18}/></span><div><span>{project?.name || "项目"} · 不可变来源快照</span><strong>{candidate.confidence}% 置信度</strong><p>{candidate.evidence}</p></div></div>
       <div className="form-stack">
-        <label><span>任务标题</span><input value={form.title} onChange={(event) => setForm({...form,title:event.target.value})}/></label>
-        <div className="form-grid"><label><span>所属项目</span><select value={form.projectId} onChange={(event) => setForm({...form,projectId:event.target.value})}>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label><span>负责人</span><select value={form.owner} onChange={(event) => setForm({...form,owner:event.target.value})}>{teamMembers.map((name) => <option key={name}>{name}</option>)}</select></label></div>
-        <div className="form-grid"><label><span>截止时间</span><input value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>执行方式</span><select value={form.mode} onChange={(event) => setForm({...form,mode:event.target.value as ExecutionMode})}><option value="human">人工</option><option value="ai">AI 执行</option><option value="hybrid">人机协作</option></select></label></div>
-        <div className="form-grid"><label><span>交付物 / 验收标准</span><input value={form.deliverable} onChange={(event) => setForm({...form,deliverable:event.target.value})}/></label><label><span>交付给 / 验收人</span><select value={form.reviewer} onChange={(event) => setForm({...form,reviewer:event.target.value})}>{teamMembers.filter((name) => name !== form.owner).map((name) => <option key={name}>{name}</option>)}</select></label></div>
+        <label><span>任务标题</span><input value={form.title} onChange={(event)=>setForm({...form,title:event.target.value})}/></label>
+        <label><span>任务说明</span><textarea value={form.description} onChange={(event)=>setForm({...form,description:event.target.value})}/></label>
+        <div className="form-grid"><label><span>所属项目</span><input value={project?.name || candidate.project_id} disabled/></label><label><span>负责人</span><select value={form.ownerId} onChange={(event)=>setForm({...form,ownerId:event.target.value})}><option value="">请选择</option>{teamMembers.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+        <div className="form-grid"><label><span>截止时间</span><input type="datetime-local" value={form.due} onChange={(event)=>setForm({...form,due:event.target.value})}/></label><label><span>交付给 / 验收人</span><select value={form.reviewerId} onChange={(event)=>setForm({...form,reviewerId:event.target.value})}><option value="">请选择</option>{teamMembers.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+        <label><span>交付物 / 验收标准</span><input value={form.deliverable} onChange={(event)=>setForm({...form,deliverable:event.target.value})}/></label>
       </div>
-      <footer className="modal-actions"><button className="text-button danger" onClick={() => {setCandidates((items) => items.filter((item) => item.id !== candidate.id)); onClose();}}>忽略候选</button><span className="action-spacer"/><button className="button secondary" onClick={onClose}>稍后处理</button><button className="button primary" onClick={create}><Check size={16}/> 确认创建</button></footer>
+      <footer className="modal-actions"><button className="text-button danger" disabled={busy} onClick={ignore}>忽略候选</button><span className="action-spacer"/><button className="button secondary" disabled={busy} onClick={onClose}>稍后处理</button><button className="button primary" disabled={busy||!form.title.trim()||!form.deliverable.trim()||!form.ownerId||!form.reviewerId} onClick={create}><Check size={16}/>{busy?"正在保存…":"确认创建"}</button></footer>
     </AppModal>
   );
 }
@@ -2662,17 +2622,11 @@ function WaitExternalModal({ task, userId, busy, onClose, onSubmit }: { task: Ta
 }
 
 function TaskDetailPage() {
-  const { tasks, setTasks, notify, addNotification, startChatWith, openPreview } = useHub();
+  const { tasks, setTasks, notify, startChatWith, openPreview } = useHub();
   const { user } = useAuth();
-  const teamMemberProfiles = useActiveTeamMemberProfiles();
-  const teamMembers = teamMemberProfiles.map((member) => member.name);
-  const memberRole = (name: string) => teamMemberProfiles.find((member) => member.name === name)?.role === "CEO" ? "团队管理员" : "成员";
   const { taskId } = useParams();
   const navigate = useNavigate();
   const task = tasks.find((item) => item.id === taskId);
-  const [comment, setComment] = useState("");
-  const [mentionMenu, setMentionMenu] = useState(false);
-  const [reviewReminderSent, setReviewReminderSent] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
   const [submissionOpen, setSubmissionOpen] = useState(false);
@@ -2683,10 +2637,6 @@ function TaskDetailPage() {
   const [submissions, setSubmissions] = useState<ApiSubmission[]>([]);
   const [externalDependency, setExternalDependency] = useState<ApiExternalDependency | null>(null);
   const [agentRuns, setAgentRuns] = useState<ApiAgentRun[]>([]);
-  const [activities, setActivities] = useState([
-    { author: "AI 助手", text: "已根据项目上下文补充了执行建议。", time: "10 分钟前" },
-    { author: task?.owner || "任务负责人", text: "更新了下一步行动。", time: "今天 10:20" },
-  ]);
   useEffect(() => {
     if (!taskId) return;
     fetchTaskSubmissions(taskId).then(setSubmissions).catch(() => setSubmissions([]));
@@ -2725,16 +2675,10 @@ function TaskDetailPage() {
     else if (task.apiStatus === "WAITING_EXTERNAL") await runAction("RESUME_EXTERNAL", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "已记录收到外部反馈，任务恢复执行");
     else if (task.apiStatus === "WAITING_HUMAN_CONFIRMATION" && agentRuns[0]) await runAction("CONFIRM_AI", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "", agent_run_id: agentRuns[0].id }, "AI 草稿已由人工确认并提交验收");
     else if (task.apiStatus === "WAITING_REVIEW" && isReviewer) await runAction("APPROVE", { expected_version: task.version || 1, summary: "", external_url: null, asset_reference: null, reason: "" }, "任务已验收完成");
-    else if (task.apiStatus === "WAITING_REVIEW" && isTaskOwner && !reviewReminderSent) {
-      addNotification({ kind: "task", title: `${task.owner}提醒你验收任务`, detail: `${task.title} · 交付物：${task.deliverable}`, taskId: task.id });
-      setActivities((items) => [...items, { author: currentUser, text: `已提醒 @${reviewer} 验收交付物「${task.deliverable}」`, time: "刚刚" }]);
-      setReviewReminderSent(true);
-      notify(`已提醒 ${reviewer} 验收，对方已收到任务通知`);
-    }
     else if (task.status === "blocked") navigate("/help");
   };
-  const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_EXTERNAL" ? "已收到反馈，恢复执行" : task.apiStatus === "WAITING_HUMAN_CONFIRMATION" ? "确认 AI 草稿并提交验收" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : isTaskOwner ? reviewReminderSent ? `已提醒 ${reviewer}` : `提醒 ${reviewer} 验收` : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
-  const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && ((!isReviewer && !isTaskOwner) || reviewReminderSent));
+  const actionLabel = actionBusy ? "处理中…" : task.apiStatus === "PENDING_OWNER_CONFIRMATION" ? "接收任务" : task.apiStatus === "TODO" ? "开始任务" : task.apiStatus === "IN_PROGRESS" ? "提交结果" : task.apiStatus === "WAITING_EXTERNAL" ? "已收到反馈，恢复执行" : task.apiStatus === "WAITING_HUMAN_CONFIRMATION" ? "确认 AI 草稿并提交验收" : task.apiStatus === "WAITING_REVIEW" ? isReviewer ? "验收通过" : `等待 ${reviewer} 验收` : task.status === "blocked" ? "发起求助" : "已完成";
+  const actionDisabled = actionBusy || task.status === "done" || (task.apiStatus === "WAITING_REVIEW" && !isReviewer);
   const generateAiDraft = async (revisionInstruction = "") => {
     setActionBusy(true);
     setAiBusy(true);
@@ -2742,6 +2686,14 @@ function TaskDetailPage() {
       const result = await startAgentRun(task.id, revisionInstruction);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
       setTasks((await fetchTasks()).map(taskFromApi));
+      if (result.run.status === "NEEDS_INPUT") {
+        notify("AI 尚未运行：请先补充任务背景和交付物");
+        return false;
+      }
+      if (result.run.status !== "SUCCEEDED") {
+        notify(result.run.error_message || "AI 运行未完成，请在执行中心查看状态");
+        return false;
+      }
       notify(result.run.execution_mode === "FALLBACK" ? "AI Live 调用失败，已生成明确标识的降级草稿" : "AI 草稿已生成，等待你人工确认");
       return true;
     } catch (reason) {
@@ -2766,7 +2718,9 @@ function TaskDetailPage() {
       const result = await startAgentRun(task.id, feedback);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
       setTasks((await fetchTasks()).map(taskFromApi));
-      notify(result.run.execution_mode === "FALLBACK" ? "重做要求已保存；Live 调用失败，已生成降级草稿" : "AI 已按修改要求生成新草稿，等待你确认");
+      if (result.run.status === "NEEDS_INPUT") notify("重做要求已保存，但任务信息不足；请补充背景和交付物后重试");
+      else if (result.run.status !== "SUCCEEDED") notify(result.run.error_message || "重做要求已保存，但 AI 运行未完成");
+      else notify(result.run.execution_mode === "FALLBACK" ? "重做要求已保存；Live 调用失败，已生成降级草稿" : "AI 已按修改要求生成新草稿，等待你确认");
     } catch (reason) {
       if (revisionSaved) {
         notify("修改要求已保存，但 AI 重新生成失败；任务已恢复进行中，可点击“AI 协助生成草稿”重试");
@@ -2777,24 +2731,6 @@ function TaskDetailPage() {
       setAiBusy(false);
       setActionBusy(false);
     }
-  };
-  const insertMention = (name: string) => {
-    setComment((value) => value.replace(/@[^@\s]*$/, "@" + name + " "));
-    setMentionMenu(false);
-  };
-  const submitComment = (event: FormEvent) => {
-    event.preventDefault();
-    if (!comment.trim()) return;
-    const mentioned = teamMembers.filter((name) => comment.includes("@" + name));
-    setActivities((items) => [...items, { author: currentUser, text: comment.trim(), time: "刚刚" }]);
-    if (mentioned.length) {
-      setTasks((items) => items.map((item) => item.id === task.id ? { ...item, collaborators: Array.from(new Set([...item.collaborators, ...mentioned])) } : item));
-      notify("已通知 " + mentioned.join("、") + "，对方可直接打开这条协作消息");
-    } else {
-      notify("任务进展已同步");
-    }
-    setComment("");
-    setMentionMenu(false);
   };
   return (
     <div className="task-detail-page">
@@ -2828,19 +2764,12 @@ function TaskDetailPage() {
           </section>
 
           <div className="task-detail-lower">
-            <section className="task-detail-section ai-suggestion"><h2><Sparkles size={17}/> AI 建议</h2><ol><li><span>1</span>先确认当前交付物的判断标准</li><li><span>2</span>读取项目最近会议与相关资产</li><li><span>3</span>完成初稿后交由 {reviewer} 验收</li></ol><div><button onClick={() => startChatWith("让产品策略专家读取任务「" + task.title + "」及项目上下文，帮我判断下一步。") }><WandSparkles size={15}/> 调用产品策略专家</button><button onClick={() => openPreview({eyebrow:"运行 Skill",title:"需求分析 · " + task.title,description:"Skill 将读取任务背景、项目会议和相关资产，输出需求缺口与下一步建议。",items:[{title:"确认读取范围",detail:task.project + " · 当前任务与关联资产"},{title:"开始分析",detail:"预计 1–2 分钟，可在 AI 执行中心查看"},{title:"人工确认结果",detail:"候选行动不会直接成为正式任务"}],note:"运行记录会关联回当前任务。",primaryLabel:"进入 AI 执行中心",primaryRoute:"/agent"})}><Boxes size={15}/> 运行需求分析 Skill</button></div></section>
+            <section className="task-detail-section ai-suggestion"><h2><Sparkles size={17}/> AI 协作说明</h2><ol><li><span>1</span>先补全任务背景、交付物和验收标准</li><li><span>2</span>项目 AI 当前只读取本项目真实任务，会议与资产尚未接入</li><li><span>3</span>AI 草稿必须由负责人确认，之后再交由 {reviewer} 验收</li></ol><div><button onClick={() => startChatWith("请基于项目中的真实任务，帮我判断任务「" + task.title + "」下一步。") }><WandSparkles size={15}/> 进入项目 AI 协作</button><button disabled title="需求分析 Skill 尚未接入服务端"><Boxes size={15}/> Skill 暂未开放</button></div></section>
             {agentRuns[0]?.output_text && <section className="task-detail-section agent-draft-result"><div className="drawer-section-title"><h3><Bot size={16}/> AI 运行草稿</h3><span>{agentRuns[0].status}</span></div><div className={"ai-mode-banner "+(agentRuns[0].execution_mode||"mock").toLowerCase()}><Sparkles size={16}/><span><strong>{agentRuns[0].execution_mode==="LIVE"?"真实 AI":agentRuns[0].execution_mode==="FALLBACK"?"降级草稿":"本地 Mock 草稿"}</strong><small>{agentRuns[0].fallback_reason||`Prompt ${agentRuns[0].prompt_version} · 尝试 ${agentRuns[0].attempt_count}/${agentRuns[0].max_attempts}`}</small></span></div><pre>{agentRuns[0].output_text}</pre><p><ShieldCheck size={14}/> AI 不会自动完成任务；负责人确认后才进入验收。</p></section>}
             {submissions.length > 0 && <section className="task-detail-section submission-history"><div className="drawer-section-title"><h3>结果版本</h3><span>{submissions.length} 个不可覆盖版本</span></div><div className="submission-version-list">{submissions.map((item) => <article key={item.id}><span>V{item.version}</span><div><strong>{item.summary || "已提交外部结果"}</strong>{item.external_url && <a href={item.external_url} target="_blank" rel="noreferrer"><Link2 size={14}/> 打开结果链接</a>}<small>提交人 {item.submitted_by} · {new Date(item.created_at).toLocaleString("zh-CN")}</small></div></article>)}</div></section>}
             <section className="task-detail-section activity-section">
-              <div className="drawer-section-title"><h3>进展与协作</h3><span>{task.collaborators.length} 位协作者</span></div>
-              <div className="task-activity-feed">{activities.map((activity, index) => <div className="activity-item" key={activity.author + index}><Avatar name={activity.author} size="sm"/><p><strong>{activity.author}</strong><span><MentionText text={activity.text}/></span><small>{activity.time}</small></p></div>)}</div>
-              <form className="mention-composer" onSubmit={submitComment}>
-                {mentionMenu && <div className="mention-menu"><small>选择要通知的同事</small>{teamMembers.filter((name) => name !== currentUser).map((name) => <button type="button" key={name} onClick={() => insertMention(name)}><Avatar name={name} size="sm"/><span>{name}</span><em>{memberRole(name)}</em></button>)}</div>}
-                {teamMembers.some((name) => comment.includes("@" + name)) && <div className="composer-mentions">{teamMembers.filter((name) => comment.includes("@" + name)).map((name) => <span className="mention-chip" key={name}>@{name}</span>)}</div>}
-                <input value={comment} onChange={(event) => {const value = event.target.value; setComment(value); setMentionMenu(/@[^@\s]*$/.test(value));}} placeholder="同步进展，或 @同事协作..." />
-                <button type="button" className="mention-trigger" onClick={() => {setComment((value) => value + (value.endsWith(" ") || !value ? "@" : " @")); setMentionMenu(true);}} aria-label="提及同事"><AtSign size={15}/></button>
-                <button className="send-progress" disabled={!comment.trim()} aria-label="发送协作消息"><Send size={15}/></button>
-              </form>
+              <div className="drawer-section-title"><h3>进展与协作</h3><span>暂未开放</span></div>
+              <div className="permission-note"><AlertCircle size={17}/><span>任务留言和 @通知尚未接入服务端，当前版本不提供会刷新丢失的临时输入。</span></div>
             </section>
           </div>
         </main>
@@ -2848,7 +2777,7 @@ function TaskDetailPage() {
         <aside className="task-detail-aside">
           <section className="task-side-panel">
             <div className="task-side-group"><h2>任务信息</h2><dl><div><dt>负责人</dt><dd><Avatar name={task.owner} size="sm"/>{task.owner}</dd></div><div><dt>交付给</dt><dd><Avatar name={reviewer} size="sm"/>{reviewer} · 验收人</dd></div><div><dt>截止时间</dt><dd><Clock3 size={15}/>{task.due}</dd></div><div><dt>执行方式</dt><dd><ModePill mode={task.mode}/></dd></div>{task.status === "blocked" && <div className="task-side-blocked"><dt>阻塞原因</dt><dd>{task.blockedReason || task.description || "等待补充阻塞原因"}</dd></div>}<div><dt>原始来源</dt><dd><MessageSquareText size={15}/>{task.source}</dd></div></dl></div>
-            <div className="task-side-group"><h2>协作成员</h2><div className="task-collaborators">{task.collaborators.length ? task.collaborators.map((name) => <span key={name}><Avatar name={name} size="sm"/>{name}</span>) : <p>暂时没有其他协作者</p>}</div><button className="button secondary compact full" onClick={() => {setComment((value) => value + (value ? " @" : "@")); setMentionMenu(true);}}><UserPlus size={15}/> 邀请成员协作</button></div>
+            <div className="task-side-group"><h2>协作成员</h2><div className="task-collaborators"><p>任务评论与成员邀请暂未开放</p></div><button className="button secondary compact full" disabled title="等待任务协作 API"><UserPlus size={15}/> 暂未开放</button></div>
             <div className="task-side-group"><h2>关联上下文</h2><button className="task-context-link" onClick={() => navigate("/projects/" + task.projectId)}><FolderKanban size={16}/><span><strong>{task.project}</strong><small>所属项目</small></span><ChevronRight size={15}/></button><button className="task-context-link" onClick={() => task.source.includes("AI Chat") ? navigate("/ai") : openPreview({eyebrow:"任务来源",title:task.source,description:"该任务从原始工作内容中提取并经人工确认后进入任务池。",items:[{title:"查看原始内容",detail:"保留会议、聊天或文档中的上下文"},{title:"查看提取记录",detail:"展示 AI 识别的负责人、时间和交付物"},{title:"回到当前任务",detail:"任务状态和协作记录不会受影响"}],note:"来源内容只读，修改任务不会覆盖原始记录。"})}><MessageSquareText size={16}/><span><strong>{task.source}</strong><small>任务来源</small></span><ChevronRight size={15}/></button></div>
           </section>
         </aside>
@@ -2862,7 +2791,7 @@ function TaskDetailPage() {
 }
 
 function TaskExtractionReview({ initialSource, onClose }: { initialSource: ExtractionSource; onClose: () => void }) {
-  const { projects, setTasks, notify } = useHub();
+  const { projects, setTasks, setCandidates:setHubCandidates, notify } = useHub();
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   const [title, setTitle] = useState(initialSource === "meeting" ? "会议行动项" : "聊天行动项");
   const [content, setContent] = useState("");
@@ -2871,10 +2800,10 @@ function TaskExtractionReview({ initialSource, onClose }: { initialSource: Extra
   const [fallbackReason, setFallbackReason] = useState<string|null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const extract = async () => {setBusy(true);setError("");try{const result=await createCandidateExtraction({project_id:projectId,source_type:initialSource==="meeting"?"MEETING":"CHAT",title,content});setCandidates(result.candidates);setMode(result.execution_mode);setFallbackReason(result.fallback_reason);notify(`已生成 ${result.candidates.length} 个候选，须人工确认后才会创建任务`);}catch(reason){setError(reason instanceof ApiError?reason.message:"候选提取失败");}finally{setBusy(false);}};
-  const save = async (candidate: ApiCandidate) => {setBusy(true);try{const updated=await updateCandidate(candidate.id,{expected_version:candidate.version,title:candidate.title,deliverable:candidate.deliverable,description:candidate.description,owner_id:candidate.owner_id,reviewer_id:candidate.reviewer_id,due_at:candidate.due_at});setCandidates((items)=>items.map((item)=>item.id===updated.id?updated:item));notify("候选修改已保存");}catch(reason){notify(reason instanceof ApiError?reason.message:"保存失败");}finally{setBusy(false);}};
-  const confirm = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await confirmCandidate(candidate.id,candidate.version);setCandidates((items)=>items.map((item)=>item.id===candidate.id?result.candidate:item));setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);notify("候选已确认并创建正式任务");}catch(reason){notify(reason instanceof ApiError?reason.message:"确认失败");}finally{setBusy(false);}};
-  const ignore = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await ignoreCandidate(candidate.id);setCandidates((items)=>items.map((item)=>item.id===result.id?result:item));notify("候选已忽略");}catch(reason){notify(reason instanceof ApiError?reason.message:"忽略失败");}finally{setBusy(false);}};
+  const extract = async () => {setBusy(true);setError("");try{const result=await createCandidateExtraction({project_id:projectId,source_type:initialSource==="meeting"?"MEETING":"CHAT",title,content});setCandidates(result.candidates);setHubCandidates((items)=>[...result.candidates.filter((item)=>item.status==="ACTIVE"),...items.filter((item)=>!result.candidates.some((candidate)=>candidate.id===item.id))]);setMode(result.execution_mode);setFallbackReason(result.fallback_reason);notify(`已生成 ${result.candidates.length} 个候选，须人工确认后才会创建任务`);}catch(reason){setError(reason instanceof ApiError?reason.message:"候选提取失败");}finally{setBusy(false);}};
+  const save = async (candidate: ApiCandidate) => {setBusy(true);try{const updated=await updateCandidate(candidate.id,{expected_version:candidate.version,title:candidate.title,deliverable:candidate.deliverable,description:candidate.description,owner_id:candidate.owner_id,reviewer_id:candidate.reviewer_id,due_at:candidate.due_at});setCandidates((items)=>items.map((item)=>item.id===updated.id?updated:item));setHubCandidates((items)=>items.map((item)=>item.id===updated.id?updated:item));notify("候选修改已保存");}catch(reason){notify(reason instanceof ApiError?reason.message:"保存失败");}finally{setBusy(false);}};
+  const confirm = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await confirmCandidate(candidate.id,candidate.version);setCandidates((items)=>items.map((item)=>item.id===candidate.id?result.candidate:item));setHubCandidates((items)=>items.filter((item)=>item.id!==candidate.id));setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);notify("候选已确认并创建正式任务");}catch(reason){notify(reason instanceof ApiError?reason.message:"确认失败");}finally{setBusy(false);}};
+  const ignore = async (candidate: ApiCandidate) => {setBusy(true);try{const result=await ignoreCandidate(candidate.id);setCandidates((items)=>items.map((item)=>item.id===result.id?result:item));setHubCandidates((items)=>items.filter((item)=>item.id!==candidate.id));notify("候选已忽略");}catch(reason){notify(reason instanceof ApiError?reason.message:"忽略失败");}finally{setBusy(false);}};
   return <AppModal title="AI 候选任务提取" subtitle="原文保存为不可变快照；AI 只生成候选，正式任务必须人工确认。" onClose={onClose} size="xl"><div className="candidate-live-workflow"><section className="form-stack"><label><span>所属项目</span><select value={projectId} onChange={(event)=>setProjectId(event.target.value)}>{projects.map((project)=><option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label><span>来源标题</span><input value={title} onChange={(event)=>setTitle(event.target.value)}/></label><label><span>粘贴{initialSource==="meeting"?"会议纪要":"聊天原文"}</span><textarea value={content} onChange={(event)=>setContent(event.target.value)} placeholder="每行一个明确行动项时，Mock 模式也可稳定提取。"/></label>{error&&<p className="login-error">{error}</p>}<button className="button primary" disabled={busy||content.trim().length<4||!projectId} onClick={extract}><Sparkles size={16}/>{busy?"处理中…":"保存快照并提取候选"}</button></section>{mode&&<div className={"ai-mode-banner "+mode.toLowerCase()}><Bot size={17}/><span><strong>{mode==="LIVE"?"真实 AI":mode==="FALLBACK"?"降级结果":"本地 Mock"}</strong><small>{mode==="FALLBACK"?`Live 调用失败，原因：${fallbackReason||"未知"}`:mode==="MOCK"?"确定性本地结果，不计入正式 Live 验收":"结果由 Qwen 实时生成并记录调用日志"}</small></span></div>}<div className="candidate-review-list">{candidates.map((candidate)=><article key={candidate.id} className={candidate.status!=="ACTIVE"?"resolved":""}><header><span>置信度 {candidate.confidence}%</span><em>{candidate.status}</em></header><input value={candidate.title} disabled={candidate.status!=="ACTIVE"} onChange={(event)=>setCandidates((items)=>items.map((item)=>item.id===candidate.id?{...item,title:event.target.value}:item))}/><textarea value={candidate.deliverable} disabled={candidate.status!=="ACTIVE"} onChange={(event)=>setCandidates((items)=>items.map((item)=>item.id===candidate.id?{...item,deliverable:event.target.value}:item))}/><small>证据：{candidate.evidence}</small>{candidate.status==="ACTIVE"&&<footer><button className="button secondary compact" disabled={busy} onClick={()=>ignore(candidate)}>忽略</button><button className="button secondary compact" disabled={busy} onClick={()=>save(candidate)}>保存修改</button><button className="button primary compact" disabled={busy||!candidate.owner_id||!candidate.reviewer_id} onClick={()=>confirm(candidate)}>确认创建任务</button></footer>}</article>)}</div></div><footer className="modal-actions"><button className="button secondary" onClick={onClose}>关闭</button></footer></AppModal>;
 }
 
@@ -3174,7 +3103,7 @@ function TeamsPage() {
           <div className="team-member-board"><div><strong>团队成员</strong><button className="text-button" onClick={() => showMembers(activeTeam)}>查看全部</button></div><TeamMemberStack members={activeTeam.members} limit={6}/><p>{activeTeam.members.slice(0, 4).join("、")}{activeTeam.members.length > 4 ? `等 ${activeTeam.members.length} 人` : ""}</p></div>
         </section>
         {activeTeam.role === "CEO" && activeTeam.id && <TeamInvitationPanel teamId={activeTeam.id} refreshKey={invitationRefresh}/>}
-        <section className="panel team-scope-note"><h3>切换团队会发生什么？</h3><p>工作台、项目空间、任务与知识会优先显示当前团队的内容；个人 AI 助手仍可在你有权限的多个团队间检索。</p><button className="text-button" onClick={() => openPreview({eyebrow:"团队与权限",title:"团队范围如何生效",description:"团队负责组织成员和工作范围，项目负责承载具体目标与交付。",items:[{title:"当前团队",detail:"决定工作台默认呈现的项目、任务和知识"},{title:"跨团队访问",detail:"个人 AI 只检索你在其他团队中已经获得授权的内容"},{title:"项目权限",detail:"加入团队后仍需按项目授予编辑或查看权限"}],note:"切换团队不会退出其他团队，也不会改变已有权限。",primaryLabel:"我知道了"})}>了解团队与权限 <ArrowRight size={14}/></button></section>
+        <section className="panel team-scope-note"><h3>切换团队会发生什么？</h3><p>工作台、项目空间和任务会优先显示当前团队内容；个人跨团队 AI 检索尚未开放。</p><button className="text-button" onClick={() => openPreview({eyebrow:"团队与权限",title:"团队范围如何生效",description:"团队负责组织成员和工作范围，项目负责承载具体目标与交付。",items:[{title:"当前团队",detail:"决定工作台默认呈现的真实项目与任务"},{title:"跨团队 AI",detail:"当前未开放，不会读取其他团队内容"},{title:"项目权限",detail:"加入团队后仍需按项目授予编辑或查看权限"}],note:"切换团队不会退出其他团队，也不会改变已有权限。",primaryLabel:"我知道了"})}>了解团队与权限 <ArrowRight size={14}/></button></section>
       </aside>
       {inviteOpen&&<InviteTeamMember team={activeTeam} onClose={()=>setInviteOpen(false)} onCreated={()=>setInvitationRefresh(value=>value+1)}/>}
     </div>
@@ -3202,21 +3131,20 @@ function PasswordSecurityCard() {
 }
 
 function SettingsPage() {
-  const { activeTeamId, teams, notify } = useHub();
+  const { activeTeamId, teams } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
   const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const [tab, setTab] = useState("个人设置");
-  const [settings, setSettings] = useState({task:true,mention:true,ai:true,weekly:false,confirm:true,assets:true});
-  const toggle = (key: keyof typeof settings) => setSettings((value) => ({...value,[key]:!value[key]}));
+  const settings = {task:true,mention:true,ai:true,weekly:false,confirm:true,assets:true};
   return <>
-    <PageHeader title="设置" description="管理个人通知、AI 权限与工作偏好。" action={<button className="button primary" onClick={() => notify("设置已保存并同步到当前账号")}>保存设置</button>} />
+    <PageHeader title="设置" description="账号信息与修改密码为真实能力；通知和 AI 偏好暂为只读预览。" />
     <div className="settings-layout">
       <aside className="panel settings-nav">{["个人设置","通知规则","AI 与权限"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}<ChevronRight size={15}/></button>)}</aside>
       <section className="panel settings-main">
-        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期</span><select><option>本周</option><option>今天</option><option>本月</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
-        {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则</h2><p>任务通知、@提及和 AI 结果统一进入顶部通知中心。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
-        {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限</h2><p>定义 AI 能读取什么，以及哪些动作必须等待人工确认。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","只读取当前成员有权访问的文件和页面"]].map(([key,title,desc]) => <button key={key} onClick={() => toggle(key as keyof typeof settings)}><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>AI 的读取权限不会超过当前操作成员；所有关键写入都会保留审计记录。</span></div></>}
+        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期（暂未开放）</span><select disabled><option>本周</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
+        {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则 · 只读预览</h2><p>保存偏好接口尚未实现，开关已禁用。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
+        {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限 · 只读预览</h2><p>权限策略由服务端固定执行，个性化设置尚未开放。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","项目 AI 当前只读取真实项目任务"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>项目 AI 的读取权限不会超过当前成员，关键写入进入人工确认。</span></div></>}
       </section>
     </div>
   </>;

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
 from sqlmodel import Session, select
 
@@ -18,10 +20,10 @@ from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
-from .model_gateway import GatewayOutputError, extract_candidates
-from .models import AgentRun, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User
+from .model_gateway import GatewayOutputError, extract_candidates, generate_project_chat_reply
+from .models import AgentRun, AgentRunStatus, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User, utc_now
 from .permissions import can_manage_project, can_read_project, is_team_admin, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -145,6 +147,110 @@ def list_project_members(project_id: str, user: User = Depends(get_current_user)
         if member and member.is_active:
             rows.append(ProjectMemberRead(id=member.id, email=member.email, name=member.name, role=ProjectRole(membership.role), is_active=member.is_active))
     return rows
+
+
+def _conversation_for_user(conversation_id: str, user: User, session: Session) -> ProjectConversation:
+    conversation = session.get(ProjectConversation, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Project conversation not found")
+    project = session.get(Project, conversation.project_id)
+    if not project or not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project conversation access denied")
+    return conversation
+
+
+def _conversation_read(session: Session, conversation: ProjectConversation) -> ProjectConversationRead:
+    creator = session.get(User, conversation.created_by)
+    message_count = len(session.exec(select(ProjectChatMessage).where(ProjectChatMessage.conversation_id == conversation.id)).all())
+    return ProjectConversationRead(id=conversation.id, project_id=conversation.project_id, title=conversation.title, created_by=conversation.created_by, created_by_name=creator.name if creator else "未知成员", created_at=conversation.created_at, updated_at=conversation.updated_at, message_count=message_count)
+
+
+def _chat_message_read(session: Session, message: ProjectChatMessage) -> ProjectChatMessageRead:
+    author = session.get(User, message.author_id) if message.author_id else None
+    try:
+        task_ids = [str(item) for item in json.loads(message.context_task_ids_json)]
+    except (json.JSONDecodeError, TypeError):
+        task_ids = []
+    task_titles = []
+    for task_id in task_ids:
+        task = session.get(Task, task_id)
+        if task:
+            task_titles.append(task.title)
+    return ProjectChatMessageRead(id=message.id, conversation_id=message.conversation_id, author_id=message.author_id, author_name=author.name if author else "项目 AI", role=message.role, content=message.content, execution_mode=str(message.execution_mode) if message.execution_mode else None, prompt_version=message.prompt_version, context_task_ids=task_ids, context_task_titles=task_titles, created_at=message.created_at)
+
+
+@app.get("/api/projects/{project_id}/conversations", response_model=list[ProjectConversationRead])
+def list_project_conversations(project_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[ProjectConversationRead]:
+    project = session.get(Project, project_id)
+    if not project or not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project access denied")
+    rows = session.exec(select(ProjectConversation).where(ProjectConversation.project_id == project_id).order_by(ProjectConversation.updated_at.desc())).all()
+    return [_conversation_read(session, row) for row in rows]
+
+
+@app.post("/api/projects/{project_id}/conversations", response_model=ProjectConversationRead)
+def create_project_conversation(project_id: str, payload: ProjectConversationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> ProjectConversationRead:
+    project = session.get(Project, project_id)
+    if not project or not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project access denied")
+    conversation = ProjectConversation(id=f"conversation-{uuid4().hex}", project_id=project.id, title=payload.title.strip(), created_by=user.id)
+    session.add(conversation)
+    session.commit()
+    session.refresh(conversation)
+    return _conversation_read(session, conversation)
+
+
+@app.get("/api/project-conversations/{conversation_id}/messages", response_model=list[ProjectChatMessageRead])
+def list_project_chat_messages(conversation_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[ProjectChatMessageRead]:
+    _conversation_for_user(conversation_id, user, session)
+    rows = session.exec(select(ProjectChatMessage).where(ProjectChatMessage.conversation_id == conversation_id).order_by(ProjectChatMessage.created_at.asc())).all()
+    return [_chat_message_read(session, row) for row in rows]
+
+
+@app.post("/api/project-conversations/{conversation_id}/messages", response_model=ProjectChatSendResponse)
+def send_project_chat_message(
+    conversation_id: str,
+    payload: ProjectChatSendRequest,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=8),
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> ProjectChatSendResponse:
+    conversation = _conversation_for_user(conversation_id, user, session)
+    existing_reply = session.exec(select(ProjectChatMessage).where(ProjectChatMessage.request_key == idempotency_key)).first()
+    if existing_reply:
+        if existing_reply.conversation_id != conversation.id or not existing_reply.reply_to_message_id:
+            raise HTTPException(status_code=409, detail={"code": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key was already used"})
+        original = session.get(ProjectChatMessage, existing_reply.reply_to_message_id)
+        if not original:
+            raise HTTPException(status_code=409, detail={"code": "IDEMPOTENCY_INCOMPLETE", "message": "Previous message is incomplete"})
+        return ProjectChatSendResponse(user_message=_chat_message_read(session, original), assistant_message=_chat_message_read(session, existing_reply))
+
+    user_message = ProjectChatMessage(id=f"message-{uuid4().hex}", conversation_id=conversation.id, author_id=user.id, role="USER", content=payload.content)
+    session.add(user_message)
+    session.flush()
+    tasks = session.exec(select(Task).where(Task.project_id == conversation.project_id).order_by(Task.updated_at.desc())).all()
+    context_rows = [f"- {task.title}｜状态：{TaskStatus(task.status).value}｜负责人ID：{task.owner_id}｜下一交付：{task.deliverable or '未填写'}" for task in tasks[:30]]
+    result = generate_project_chat_reply(session, conversation.project_id, payload.content, "\n".join(context_rows))
+    context_task_ids = [task.id for task in tasks[:30]]
+    assistant_message = ProjectChatMessage(id=f"message-{uuid4().hex}", conversation_id=conversation.id, author_id=None, role="ASSISTANT", content=result.text, execution_mode=result.execution_mode, prompt_version="project-chat-v1", ai_call_id=result.call_id, request_key=idempotency_key, reply_to_message_id=user_message.id, context_task_ids_json=json.dumps(context_task_ids))
+    session.add(assistant_message)
+    if conversation.title == "新对话":
+        conversation.title = payload.content[:40]
+    conversation.updated_at = utc_now()
+    session.add(conversation)
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        replay = session.exec(select(ProjectChatMessage).where(ProjectChatMessage.request_key == idempotency_key)).first()
+        if replay and replay.reply_to_message_id:
+            original = session.get(ProjectChatMessage, replay.reply_to_message_id)
+            if original:
+                return ProjectChatSendResponse(user_message=_chat_message_read(session, original), assistant_message=_chat_message_read(session, replay))
+        raise HTTPException(status_code=409, detail={"code": "CONCURRENT_WRITE", "message": "Message was already sent"}) from exc
+    session.refresh(user_message)
+    session.refresh(assistant_message)
+    return ProjectChatSendResponse(user_message=_chat_message_read(session, user_message), assistant_message=_chat_message_read(session, assistant_message))
 
 
 @app.get("/api/tasks", response_model=list[TaskRead])
@@ -399,8 +505,11 @@ def ignore_candidate(candidate_id: str, idempotency_key: str = Header(alias="Ide
     return candidate_read(candidate)
 
 
-def _agent_run_read(run: AgentRun) -> AgentRunRead:
-    return AgentRunRead(id=run.id, task_id=run.task_id, status=str(run.status), execution_mode=str(run.execution_mode) if run.execution_mode else None, degraded=run.degraded, fallback_reason=run.fallback_reason, prompt_version=run.prompt_version, attempt_count=run.attempt_count, max_attempts=run.max_attempts, output_text=run.output_text, error_message=run.error_message, started_at=run.started_at, finished_at=run.finished_at, created_at=run.created_at)
+def _agent_run_read(session: Session, run: AgentRun) -> AgentRunRead:
+    task = session.get(Task, run.task_id)
+    project = session.get(Project, task.project_id) if task else None
+    requester = session.get(User, run.requested_by)
+    return AgentRunRead(id=run.id, task_id=run.task_id, status=str(run.status), execution_mode=str(run.execution_mode) if run.execution_mode else None, degraded=run.degraded, fallback_reason=run.fallback_reason, prompt_version=run.prompt_version, attempt_count=run.attempt_count, max_attempts=run.max_attempts, output_text=run.output_text, error_message=run.error_message, started_at=run.started_at, finished_at=run.finished_at, created_at=run.created_at, task_title=task.title if task else "已删除任务", project_id=project.id if project else "", project_name=project.name if project else "已删除项目", requested_by_name=requester.name if requester else "未知成员")
 
 
 @app.post("/api/tasks/{task_id}/agent-runs", response_model=AgentRunStartResponse)
@@ -411,14 +520,33 @@ def create_agent_run(task_id: str, payload: AgentRunStartRequest | None = None, 
     except DomainError as exc:
         session.rollback()
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": exc.message}) from exc
-    return AgentRunStartResponse(run=_agent_run_read(run), idempotent_replay=replay)
+    return AgentRunStartResponse(run=_agent_run_read(session, run), idempotent_replay=replay)
 
 
 @app.get("/api/tasks/{task_id}/agent-runs", response_model=list[AgentRunRead])
 def task_agent_runs(task_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[AgentRunRead]:
     _task_for_user(task_id, user, session)
     rows = session.exec(select(AgentRun).where(AgentRun.task_id == task_id).order_by(AgentRun.created_at.desc())).all()
-    return [_agent_run_read(run) for run in rows]
+    return [_agent_run_read(session, run) for run in rows]
+
+
+@app.get("/api/agent-runs", response_model=list[AgentRunRead])
+def list_agent_runs(status: str | None = None, project_id: str | None = None, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[AgentRunRead]:
+    allowed_projects = readable_project_ids(session, user)
+    if project_id:
+        if project_id not in allowed_projects:
+            raise HTTPException(status_code=403, detail="Project access denied")
+        allowed_projects = [project_id]
+    if status and status not in {item.value for item in AgentRunStatus}:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_AGENT_RUN_STATUS", "message": "Unknown agent run status"})
+    task_ids = session.exec(select(Task.id).where(Task.project_id.in_(allowed_projects))).all() if allowed_projects else []
+    if not task_ids:
+        return []
+    query = select(AgentRun).where(AgentRun.task_id.in_(task_ids))
+    if status:
+        query = query.where(AgentRun.status == status)
+    rows = session.exec(query.order_by(AgentRun.created_at.desc())).all()
+    return [_agent_run_read(session, run) for run in rows]
 
 
 @app.get("/api/contributions", response_model=list[ContributionRead])

@@ -303,3 +303,58 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
     result = TextGatewayResult(text=text, execution_mode=mode.value, degraded=degraded, fallback_reason=fallback_reason, call_id=call_id, attempt_count=attempt_count)
     session.add(AiResponseCache(cache_key=cache_key, response_json=result.model_dump_json()))
     return result
+
+
+def generate_project_chat_reply(session: Session, project_id: str, question: str, task_context: str) -> TextGatewayResult:
+    settings = load_settings()
+    live_model = settings.ollama_model if settings.ai_provider == "ollama" else settings.qwen_model
+    prompt_version = "project-chat-v1"
+    grounded_input = f"问题：{question}\n\n当前项目任务：\n{task_context or '当前项目暂无任务。'}"
+    input_hash = hashlib.sha256(grounded_input.encode()).hexdigest()
+    cache_key = hashlib.sha256(f"{project_id}:{prompt_version}:{input_hash}".encode()).hexdigest()
+    cached = session.get(AiResponseCache, cache_key)
+    if cached:
+        stored = json.loads(cached.response_json)
+        stored["cached"] = True
+        return TextGatewayResult(**stored)
+
+    started = time.perf_counter()
+    mode, degraded, fallback_reason, usage, attempt_count = AiExecutionMode.MOCK, False, None, {}, 1
+    if task_context:
+        text = f"我只读取了当前项目中可见的任务。根据现有任务，建议先处理以下事项：\n{task_context}\n\n会议和资产尚未接入本次回答。"
+    else:
+        text = "当前项目暂无可引用任务，因此无法基于项目事实给出进度判断。会议和资产尚未接入本次回答。"
+    live_requested = settings.ai_mode == "live" and (settings.ai_provider == "ollama" or bool(settings.qwen_api_key))
+    today = datetime.now(timezone.utc).date().isoformat()
+    spent = sum(row.cost_usd for row in session.exec(select(AiCallLog).where(AiCallLog.project_id == project_id)).all() if row.created_at.date().isoformat() == today)
+    if live_requested and spent >= settings.ai_daily_budget_usd:
+        mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
+    elif live_requested:
+        url, auth_header, model, _use_json = _live_target(settings)
+        prompt = (
+            "你是项目协作助手。只能根据下面提供的当前项目任务回答，不得声称读取了会议、资产、聊天或其他项目。"
+            "回答中应明确引用相关任务标题；信息不足时直接说明。不要执行外部动作，也不要把建议冒充已完成事项。\n\n"
+            + grounded_input
+        )
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            attempt_count = _attempt + 1
+            try:
+                candidate_text, usage = _live_chat(url, auth_header, model, prompt, False)
+                if not candidate_text:
+                    raise ValueError("empty model output")
+                text, mode = candidate_text, AiExecutionMode.LIVE
+                break
+            except (OSError, KeyError, ValueError) as exc:
+                last_error = exc
+        else:
+            mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, type(last_error).__name__ if last_error else "LIVE_FAILED"
+
+    recorded_model = live_model if mode == AiExecutionMode.LIVE else "deterministic-mock-v1"
+    call_id = f"call-{uuid4().hex}"
+    input_tokens = int(usage.get("prompt_tokens", max(1, len(grounded_input) // 4)))
+    output_tokens = int(usage.get("completion_tokens", max(1, len(text) // 4)))
+    session.add(AiCallLog(id=call_id, project_id=project_id, capability="project_chat", prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=round((time.perf_counter() - started) * 1000), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=(input_tokens * 0.0000005 + output_tokens * 0.0000015) if mode == AiExecutionMode.LIVE else 0, success=True))
+    result = TextGatewayResult(text=text, execution_mode=mode.value, degraded=degraded, fallback_reason=fallback_reason, call_id=call_id, attempt_count=attempt_count)
+    session.add(AiResponseCache(cache_key=cache_key, response_json=result.model_dump_json()))
+    return result

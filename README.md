@@ -13,6 +13,8 @@
 
 规划中的必做开发阶段 0–6 已实现。当前处于发布验收：自动化与 Mock 模式已通过；正式 MVP 放行仍须使用有效 `QWEN_API_KEY` 完成至少一次候选提取和一次任务草稿的 Live 验收，详见 `docs/release-checklist.md`。
 
+P0/P1 演示残留已完成收口：候选、任务状态、AgentRun 和项目 AI 对话均使用服务端数据；开放认领、个人跨项目 AI、通知写入及知识/资产/能力等未接入功能已隐藏、只读或禁用。可写入口边界见 `docs/button-truth-matrix.md`。
+
 - 新建项目、阶段和手动任务均走真实 API 与数据库，不再使用前端临时 ID。
 - 阶段使用独立 `PLANNED/ACTIVE/WAITING_REVIEW/DONE` 状态机，可在项目空间推进。
 - 阶段进度由所属任务聚合；项目进度按阶段权重聚合；风险由阻塞、任务逾期和外部依赖派生。
@@ -60,6 +62,7 @@
 ```bash
 cd frontend
 pnpm install --frozen-lockfile
+pnpm check:truth
 pnpm typecheck
 pnpm build
 ```

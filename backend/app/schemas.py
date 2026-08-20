@@ -354,6 +354,10 @@ class AgentRunRead(ApiModel):
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
+    task_title: str
+    project_id: str
+    project_name: str
+    requested_by_name: str
 
 
 class AgentRunStartRequest(ApiModel):
@@ -363,6 +367,52 @@ class AgentRunStartRequest(ApiModel):
 class AgentRunStartResponse(ApiModel):
     run: AgentRunRead
     idempotent_replay: bool
+
+
+class ProjectConversationCreateRequest(ApiModel):
+    title: str = Field(default="新对话", min_length=1, max_length=120)
+
+
+class ProjectConversationRead(ApiModel):
+    id: str
+    project_id: str
+    title: str
+    created_by: str
+    created_by_name: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+
+
+class ProjectChatMessageRead(ApiModel):
+    id: str
+    conversation_id: str
+    author_id: str | None
+    author_name: str
+    role: Literal["USER", "ASSISTANT"]
+    content: str
+    execution_mode: Literal["LIVE", "MOCK", "FALLBACK"] | None
+    prompt_version: str | None
+    context_task_ids: list[str]
+    context_task_titles: list[str]
+    created_at: datetime
+
+
+class ProjectChatSendRequest(ApiModel):
+    content: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("content")
+    @classmethod
+    def non_empty_content(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("消息不能为空")
+        return cleaned
+
+
+class ProjectChatSendResponse(ApiModel):
+    user_message: ProjectChatMessageRead
+    assistant_message: ProjectChatMessageRead
 
 
 class ProjectCreateRequest(ApiModel):

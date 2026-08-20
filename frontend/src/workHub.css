@@ -1365,6 +1365,18 @@ a:focus-visible {
   cursor: default;
 }
 
+.assistant-input .assistant-project-entry {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
 .extraction-batch-list {
   display: flex;
   flex-direction: column;
@@ -2217,7 +2229,8 @@ a:focus-visible {
     margin-top: 5px;
     font-size: 11px;
   }
-  .dashboard-screen .assistant-input button { width: 25px; height: 25px; }
+  .dashboard-screen .assistant-input button:not(.assistant-project-entry) { width: 25px; height: 25px; }
+  .dashboard-screen .assistant-input .assistant-project-entry { height: 25px; font-size: 11px; }
   .dashboard-screen .assistant-life-stage {
     display: flex;
     min-height: 54px;
