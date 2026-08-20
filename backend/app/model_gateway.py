@@ -278,13 +278,15 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
     if live_requested and spent >= settings.ai_daily_budget_usd:
         mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
     elif live_requested:
-        url, auth_header, model, use_json = _live_target(settings)
+        url, auth_header, model, _use_json = _live_target(settings)
         prompt = "根据以下任务信息生成可直接人工复核的交付草稿，不要声称已完成未执行的外部动作：\n" + task_context
         last_error: Exception | None = None
         for _attempt in range(2):
             attempt_count = _attempt + 1
             try:
-                candidate_text, usage = _live_chat(url, auth_header, model, prompt, use_json)
+                # Task drafts are free-form text. DashScope rejects json_object mode
+                # when the prompt does not explicitly request a JSON response.
+                candidate_text, usage = _live_chat(url, auth_header, model, prompt, False)
                 if not candidate_text:
                     raise ValueError("empty model output")
                 text, mode = candidate_text, AiExecutionMode.LIVE
