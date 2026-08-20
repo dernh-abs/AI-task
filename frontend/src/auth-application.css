@@ -117,3 +117,36 @@
   font-weight: 700;
   cursor: pointer;
 }
+
+.login-card .auth-remember {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+.login-card .auth-remember input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: #246bfd;
+}
+
+.login-card .auth-remember > span {
+  display: grid;
+  gap: 2px;
+}
+
+.login-card .auth-remember strong {
+  color: #344054;
+  font-size: 13px;
+}
+
+.login-card .auth-remember small {
+  color: #7b8799;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+}

@@ -2,6 +2,7 @@ import type { components } from "./api-schema";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
 const TOKEN_KEY = "quanyi-mvp-token";
+const REMEMBER_KEY = "quanyi-mvp-remember";
 
 export type ApiUser = components["schemas"]["UserRead"];
 export type ApiProject = components["schemas"]["ProjectRead"];
@@ -25,7 +26,25 @@ export type ApiInvitationAdmin = components["schemas"]["InvitationAdminRead"];
 export type ApiTeam = components["schemas"]["TeamRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
-export const tokenStore = { get:()=>window.localStorage.getItem(TOKEN_KEY), set:(token:string)=>window.localStorage.setItem(TOKEN_KEY,token), clear:()=>window.localStorage.removeItem(TOKEN_KEY) };
+export const tokenStore = {
+  get:()=>{
+    const sessionToken=window.sessionStorage.getItem(TOKEN_KEY);
+    if(sessionToken)return sessionToken;
+    const persistentToken=window.localStorage.getItem(TOKEN_KEY);
+    if(persistentToken&&window.localStorage.getItem(REMEMBER_KEY)==="true")return persistentToken;
+    if(persistentToken)window.localStorage.removeItem(TOKEN_KEY);
+    return null;
+  },
+  set:(token:string,persistent=false)=>{
+    window.sessionStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(REMEMBER_KEY);
+    if(persistent){window.localStorage.setItem(TOKEN_KEY,token);window.localStorage.setItem(REMEMBER_KEY,"true");return;}
+    window.sessionStorage.setItem(TOKEN_KEY,token);
+  },
+  clear:()=>{window.sessionStorage.removeItem(TOKEN_KEY);window.localStorage.removeItem(TOKEN_KEY);window.localStorage.removeItem(REMEMBER_KEY);},
+  isPersistent:()=>Boolean(window.localStorage.getItem(TOKEN_KEY)&&window.localStorage.getItem(REMEMBER_KEY)==="true")
+};
 
 async function request<T>(path:string, options:RequestInit={}):Promise<T> {
   const token=tokenStore.get();
