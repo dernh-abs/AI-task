@@ -106,7 +106,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 };
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
-const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, healthReasons:item.health_reasons, progress:item.progress, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
+const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, healthReasons:item.health_reasons, progress:item.progress, ownerId:item.owner_id, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
 const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), dueAt:item.due_at, priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
@@ -116,6 +116,7 @@ type HubContextValue = {
   setCandidates: React.Dispatch<React.SetStateAction<ApiCandidate[]>>;
   projects: Project[];
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
+  refreshProjects: () => Promise<void>;
   helps: HelpRequest[];
   setHelps: React.Dispatch<React.SetStateAction<HelpRequest[]>>;
   assets: Asset[];
@@ -591,6 +592,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
   const [chatPrompt, setChatPrompt] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [flowPreview, setFlowPreview] = useState<FlowPreview | null>(null);
+  const refreshProjects = async () => setProjects((await fetchProjects()).map(projectFromApi));
 
   useEffect(() => {
     window.localStorage.setItem("quanyi-active-team", activeTeamId);
@@ -640,6 +642,7 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     setCandidates,
     projects,
     setProjects,
+    refreshProjects,
     helps,
     setHelps,
     assets,
@@ -1216,37 +1219,40 @@ function ProjectsPage() {
 
 function CreateProject({ onClose, onCreate }: { onClose: () => void; onCreate: (project: Project) => void }) {
   const { user } = useAuth();
+  const { activeTeamId } = useHub();
+  const members = useActiveTeamMemberProfiles();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ name: "", client: "", owner: user.name, due: "", milestone: "完成项目启动与范围确认" });
+  const [form, setForm] = useState({ name: "", client: "", ownerId: members.find((member) => member.id === user.id)?.id || members[0]?.id || "", due: "", milestone: "完成项目启动与范围确认" });
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.name.trim() || !form.client.trim()) return;
+    if (!form.name.trim() || !form.client.trim() || !form.ownerId) return;
     setBusy(true);setError("");
-    try {const created=await createProject({name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,next_milestone:form.milestone,due_at:form.due ? new Date(`${form.due}T23:59:59`).toISOString() : null});onCreate(projectFromApi(created,0));}
+    try {const created=await createProject({team_id:activeTeamId||null,name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,owner_id:form.ownerId,next_milestone:form.milestone,due_at:form.due ? new Date(`${form.due}T23:59:59`).toISOString() : null});onCreate(projectFromApi(created,0));}
     catch(reason){setError(reason instanceof ApiError?reason.message:"项目创建失败");}
     finally{setBusy(false);}
   };
   return <AppModal title="新建项目" subtitle="创建后进入独立项目空间，再逐步补充任务、资产、会议与 AI 上下文。" onClose={onClose} size="lg">
     <form className="form-stack" onSubmit={submit}>
       <label><span>项目名称 *</span><input autoFocus value={form.name} onChange={(event) => setForm({...form,name:event.target.value})} placeholder="例如：客户官网升级"/></label>
-      <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人</span><input value={form.owner} disabled /></label></div>
+      <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人 *</span><select value={form.ownerId} onChange={(event) => setForm({...form,ownerId:event.target.value})}><option value="">请选择负责人</option>{members.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
       <div className="form-grid"><label><span>目标日期</span><input type="date" value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>第一个里程碑</span><input value={form.milestone} onChange={(event) => setForm({...form,milestone:event.target.value})}/></label></div>
       <div className="ai-form-tip"><Sparkles size={17}/><span>创建后可进入项目空间补充阶段和任务；所有正式任务仍需人工创建或确认。</span></div>
       {error&&<p className="login-error">{error}</p>}
-      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim() || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
+      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim() || !form.ownerId || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
     </form>
   </AppModal>;
 }
 
 function CreateStageModal({ project, onClose, onSaved }: { project: Project; onClose: () => void; onSaved: (project: Project) => void }) {
-  const { user } = useAuth();
+  const members = useActiveTeamMemberProfiles();
   const [name, setName] = useState("");
+  const [ownerId, setOwnerId] = useState(project.ownerId || members[0]?.id || "");
   const [weight, setWeight] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const submit = async (event: FormEvent) => {event.preventDefault();if(!name.trim())return;setBusy(true);setError("");try{const result=await createStage(project.id,{name:name.trim(),owner_id:user.id,weight});onSaved(projectFromApi(result,0));}catch(reason){setError(reason instanceof ApiError?reason.message:"阶段创建失败");}finally{setBusy(false);}};
-  return <AppModal title="新增项目阶段" subtitle="阶段使用独立状态，进度和风险由所属任务在服务端聚合。" onClose={onClose}><form className="form-stack" onSubmit={submit}><label><span>阶段名称</span><input autoFocus value={name} onChange={(event)=>setName(event.target.value)} placeholder="例如：方案设计"/></label><label><span>聚合权重</span><input type="number" min="0.1" max="100" step="0.1" value={weight} onChange={(event)=>setWeight(Number(event.target.value))}/></label>{error&&<p className="login-error">{error}</p>}<footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!name.trim()||busy}>{busy?"创建中…":"创建阶段"}</button></footer></form></AppModal>;
+  const submit = async (event: FormEvent) => {event.preventDefault();if(!name.trim()||!ownerId)return;setBusy(true);setError("");try{const result=await createStage(project.id,{name:name.trim(),owner_id:ownerId,weight});onSaved(projectFromApi(result,0));}catch(reason){setError(reason instanceof ApiError?reason.message:"阶段创建失败");}finally{setBusy(false);}};
+  return <AppModal title="新增项目阶段" subtitle="阶段使用独立状态，进度和风险由所属任务在服务端聚合。" onClose={onClose}><form className="form-stack" onSubmit={submit}><label><span>阶段名称</span><input autoFocus value={name} onChange={(event)=>setName(event.target.value)} placeholder="例如：方案设计"/></label><div className="form-grid"><label><span>负责人 *</span><select value={ownerId} onChange={(event)=>setOwnerId(event.target.value)}><option value="">请选择负责人</option>{members.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label><label><span>聚合权重</span><input type="number" min="0.1" max="100" step="0.1" value={weight} onChange={(event)=>setWeight(Number(event.target.value))}/></label></div>{error&&<p className="login-error">{error}</p>}<footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!name.trim()||!ownerId||busy}>{busy?"创建中…":"创建阶段"}</button></footer></form></AppModal>;
 }
 
 function ProjectSpace() {
@@ -1349,7 +1355,7 @@ function ProjectSpace() {
 
 function ProjectBoard({ tasks }: { tasks: Task[] }) {
   type BoardColumnKey="todo"|"active"|"review"|"waiting"|"done";
-  const {openTask,setTasks,notify}=useHub();
+  const {openTask,setTasks,refreshProjects,notify}=useHub();
   const [draggedTaskId,setDraggedTaskId]=useState<string|null>(null);
   const [hoveredColumn,setHoveredColumn]=useState<BoardColumnKey|null>(null);
   const [returnTask,setReturnTask]=useState<Task|null>(null);
@@ -1358,7 +1364,7 @@ function ProjectBoard({ tasks }: { tasks: Task[] }) {
   const columns:{key:BoardColumnKey;label:string;hint:string;statuses:TaskStatus[]}[]=[{key:"todo",label:"待开始",hint:"接收或尚未启动",statuses:["todo"]},{key:"active",label:"进行中",hint:"服务端执行状态",statuses:["progress","ai"]},{key:"review",label:"待确认 / 验收",hint:"等待人工判断",statuses:["confirm","review"]},{key:"waiting",label:"阻塞 / 等待",hint:"从任务详情管理依赖",statuses:["blocked","external"]},{key:"done",label:"已完成",hint:"人工验收后归档",statuses:["done"]}];
   const taskColumn=(task:Task):BoardColumnKey=>columns.find((column)=>column.statuses.includes(task.status))?.key||"todo";
   const actionFor=(task:Task,target:BoardColumnKey):"ACCEPT"|"START"|"APPROVE"|"RETURN"|"RESUME_EXTERNAL"|null=>{if(target==="active"&&task.apiStatus==="PENDING_OWNER_CONFIRMATION")return"ACCEPT";if(target==="active"&&task.apiStatus==="TODO")return"START";if(target==="active"&&task.apiStatus==="WAITING_EXTERNAL")return"RESUME_EXTERNAL";if(target==="active"&&task.apiStatus==="WAITING_REVIEW")return"RETURN";if(target==="done"&&task.apiStatus==="WAITING_REVIEW")return"APPROVE";return null;};
-  const runAction=async(task:Task,action:"ACCEPT"|"START"|"APPROVE"|"RETURN"|"RESUME_EXTERNAL",reason="")=>{setBusy(true);try{const result=await performTaskAction(task.id,action,{expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason});setTasks((items)=>items.map((item)=>item.id===task.id?taskFromApi(result.task):item));notify(action==="APPROVE"?"任务已验收完成":action==="RETURN"?"任务已退回修改":"任务状态已由服务端更新");return true;}catch(cause){notify(cause instanceof ApiError?cause.message:"状态更新失败，请刷新后重试");return false;}finally{setBusy(false);}};
+  const runAction=async(task:Task,action:"ACCEPT"|"START"|"APPROVE"|"RETURN"|"RESUME_EXTERNAL",reason="")=>{setBusy(true);try{const result=await performTaskAction(task.id,action,{expected_version:task.version||1,summary:"",external_url:null,asset_reference:null,reason});setTasks((items)=>items.map((item)=>item.id===task.id?taskFromApi(result.task):item));await refreshProjects();notify(action==="APPROVE"?"任务已验收完成":action==="RETURN"?"任务已退回修改":"任务状态和项目进度已更新");return true;}catch(cause){notify(cause instanceof ApiError?cause.message:"状态更新失败，请刷新后重试");return false;}finally{setBusy(false);}};
   const requestMove=(task:Task,target:BoardColumnKey)=>{const action=actionFor(task,target);if(action==="RETURN"){setReturnTask(task);setReturnReason("");return;}if(action){void runAction(task,action);return;}if(taskColumn(task)!==target){notify(target==="review"?"提交结果或确认 AI 草稿需要完整内容，请进入任务详情":"该状态没有合法的服务端动作，请进入任务详情处理");openTask(task);}};
   const draggedTask=tasks.find((task)=>task.id===draggedTaskId)||null;
   return <div className="project-board-wrap"><div className="kanban-interaction-guide"><span><GripVertical size={15}/>仅允许服务端状态机支持的拖动</span><span><ShieldCheck size={15}/>提交、等待外部和 AI 确认请进入任务详情</span></div><div className="board-scroll"><div className="kanban-board">{columns.map((column)=>{const columnTasks=tasks.filter((task)=>column.statuses.includes(task.status));const activeDrop=hoveredColumn===column.key&&draggedTask;const validDrop=Boolean(activeDrop&&actionFor(activeDrop,column.key));return <section className={`kanban-column${activeDrop?validDrop?" is-valid-drop":" is-invalid-drop":""}${draggedTask?" is-dragging-board":""}`} key={column.key} onDragEnter={()=>setHoveredColumn(column.key)} onDragOver={(event)=>{event.preventDefault();event.dataTransfer.dropEffect=validDrop?"move":"none";}} onDrop={(event)=>{event.preventDefault();const task=tasks.find((item)=>item.id===(draggedTaskId||event.dataTransfer.getData("text/plain")));setDraggedTaskId(null);setHoveredColumn(null);if(task)requestMove(task,column.key);}}><header><div><strong>{column.label}</strong><small>{column.hint}</small></div><span>{columnTasks.length}</span></header><div className="kanban-list">{columnTasks.map((task)=><article className={`kanban-card${draggedTaskId===task.id?" is-dragging":""}`} key={task.id}><div className="kanban-card-top"><span className={"priority-dot "+task.priority}/><div><StatusPill status={task.status}/>{task.status!=="done"&&<button className="kanban-drag-handle" draggable={!busy} aria-label={`流转任务：${task.title}`} title="只允许合法服务端动作" onDragStart={(event)=>{setDraggedTaskId(task.id);event.dataTransfer.setData("text/plain",task.id);}} onDragEnd={()=>{setDraggedTaskId(null);setHoveredColumn(null);}}><GripVertical size={15}/></button>}</div></div><button className="kanban-card-open" onClick={()=>openTask(task)}><strong>{task.title}</strong><small>{task.nextAction}</small></button><footer><ModePill mode={task.mode}/><span>{task.due}</span></footer></article>)}{!columnTasks.length&&<div className="kanban-empty">暂无任务</div>}</div></section>;})}</div></div>{returnTask&&<AppModal title="退回修改" subtitle="原因将写入服务端状态历史。" onClose={()=>setReturnTask(null)} size="md"><form className="form-stack" onSubmit={async(event)=>{event.preventDefault();if(returnReason.trim()&&await runAction(returnTask,"RETURN",returnReason.trim()))setReturnTask(null);}}><label><span>退回原因</span><textarea autoFocus value={returnReason} onChange={(event)=>setReturnReason(event.target.value)} placeholder="说明未通过的验收标准"/></label><footer className="modal-actions"><button type="button" className="button secondary" onClick={()=>setReturnTask(null)}>取消</button><button className="button primary" disabled={busy||!returnReason.trim()}>{busy?"处理中…":"确认退回"}</button></footer></form></AppModal>}</div>;
@@ -2526,7 +2532,7 @@ function GlobalSearch({ onClose }: { onClose: () => void }) {
 }
 
 function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaultProjectId?: string }) {
-  const { projects, setTasks, notify } = useHub();
+  const { projects, setTasks, refreshProjects, notify } = useHub();
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [members, setMembers] = useState<ApiProjectMember[]>([]);
@@ -2556,6 +2562,7 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
     try {
       const created = await createTask({project_id:form.projectId,stage_id:null,title:form.title.trim(),description:"从快速新建创建的任务，可在详情中继续补充背景。",deliverable:form.deliverable.trim()||"待补充交付物",acceptance:form.deliverable.trim()||"负责人提交非空结果并由验收人确认",owner_id:form.ownerId,reviewer_id:form.reviewerId,execution_mode:form.mode==="human"?"HUMAN":form.mode==="ai"?"AI":"HYBRID",priority:"MEDIUM",due_at:form.due ? new Date(form.due).toISOString() : null});
       setTasks((items) => [taskFromApi(created), ...items]);
+      await refreshProjects();
       notify("任务已真实创建并加入任务池");
       onClose();
     } catch (reason) {
@@ -2578,7 +2585,7 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
 }
 
 function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onClose: () => void }) {
-  const { projects, setTasks, setCandidates, notify } = useHub();
+  const { projects, setTasks, setCandidates, refreshProjects, notify } = useHub();
   const teamMembers = useActiveTeamMemberProfiles();
   const [form, setForm] = useState({ title:candidate.title, ownerId:candidate.owner_id || "", reviewerId:candidate.reviewer_id || "", due:candidate.due_at ? candidate.due_at.slice(0,16) : "", deliverable:candidate.deliverable, description:candidate.description });
   const [busy, setBusy] = useState(false);
@@ -2591,6 +2598,7 @@ function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onCl
       const result = await confirmCandidate(updated.id,updated.version);
       setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);
       setCandidates((items)=>items.filter((item)=>item.id!==candidate.id));
+      await refreshProjects();
       notify("候选已由服务端确认并创建正式任务");
       onClose();
     } catch (reason) {
@@ -2637,7 +2645,7 @@ function WaitExternalModal({ task, userId, busy, onClose, onSubmit }: { task: Ta
 }
 
 function TaskDetailPage() {
-  const { tasks, setTasks, notify, startChatWith, openPreview } = useHub();
+  const { tasks, setTasks, refreshProjects, notify, startChatWith, openPreview } = useHub();
   const { user } = useAuth();
   const { taskId } = useParams();
   const navigate = useNavigate();
@@ -2671,6 +2679,7 @@ function TaskDetailPage() {
     try {
       const result = await performTaskAction(task.id, actionName, payload);
       replaceTask(result.task);
+      await refreshProjects();
       setSubmissions(await fetchTaskSubmissions(task.id));
       setExternalDependency(await fetchExternalDependency(task.id));
       setAgentRuns(await fetchAgentRuns(task.id));
@@ -2701,6 +2710,7 @@ function TaskDetailPage() {
       const result = await startAgentRun(task.id, revisionInstruction);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
       setTasks((await fetchTasks()).map(taskFromApi));
+      await refreshProjects();
       if (result.run.status === "NEEDS_INPUT") {
         notify("AI 尚未运行：请先补充任务背景和交付物");
         return false;
@@ -2733,6 +2743,7 @@ function TaskDetailPage() {
       const result = await startAgentRun(task.id, feedback);
       setAgentRuns((items) => [result.run, ...items.filter((item) => item.id !== result.run.id)]);
       setTasks((await fetchTasks()).map(taskFromApi));
+      await refreshProjects();
       if (result.run.status === "NEEDS_INPUT") notify("重做要求已保存，但任务信息不足；请补充背景和交付物后重试");
       else if (result.run.status !== "SUCCEEDED") notify(result.run.error_message || "重做要求已保存，但 AI 运行未完成");
       else notify(result.run.execution_mode === "FALLBACK" ? "重做要求已保存；Live 调用失败，已生成降级草稿" : "AI 已按修改要求生成新草稿，等待你确认");

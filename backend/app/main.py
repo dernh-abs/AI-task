@@ -271,9 +271,16 @@ def create_project(payload: ProjectCreateRequest, user: User = Depends(get_curre
         if len(admin_memberships) > 1 and not payload.team_id:
             raise HTTPException(status_code=422, detail="team_id is required when administering multiple teams")
         raise HTTPException(status_code=403, detail="Only a team administrator can create projects")
-    project = Project(id=f"project-{uuid4().hex}", team_id=membership.team_id, name=payload.name, client=payload.client, objective=payload.objective, owner_id=user.id, next_milestone=payload.next_milestone, due_at=payload.due_at)
+    owner_id = payload.owner_id or user.id
+    owner_membership = session.get(TeamMember, (membership.team_id, owner_id))
+    owner = session.get(User, owner_id)
+    if not owner_membership or not owner or not owner.is_active:
+        raise HTTPException(status_code=422, detail="Project owner must be an active team member")
+    project = Project(id=f"project-{uuid4().hex}", team_id=membership.team_id, name=payload.name, client=payload.client, objective=payload.objective, owner_id=owner_id, next_milestone=payload.next_milestone, due_at=payload.due_at)
     session.add(project)
-    session.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
+    session.add(ProjectMember(project_id=project.id, user_id=owner_id, role=ProjectRole.OWNER))
+    if user.id != owner_id:
+        session.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.MEMBER))
     session.commit()
     return project_reads(session, [project.id])[0]
 
@@ -285,6 +292,21 @@ def update_project(project_id: str, payload: ProjectUpdateRequest, user: User = 
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_manage_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project edit denied")
+    if payload.owner_id is not None and payload.owner_id != project.owner_id:
+        owner_membership = session.get(TeamMember, (project.team_id, payload.owner_id))
+        owner = session.get(User, payload.owner_id)
+        if not owner_membership or not owner or not owner.is_active:
+            raise HTTPException(status_code=422, detail="Project owner must be an active team member")
+        current_owner = session.get(ProjectMember, (project.id, project.owner_id))
+        if current_owner:
+            current_owner.role = ProjectRole.MEMBER
+            session.add(current_owner)
+        next_owner = session.get(ProjectMember, (project.id, payload.owner_id))
+        if next_owner:
+            next_owner.role = ProjectRole.OWNER
+            session.add(next_owner)
+        else:
+            session.add(ProjectMember(project_id=project.id, user_id=payload.owner_id, role=ProjectRole.OWNER))
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
     session.add(project)
@@ -299,8 +321,12 @@ def create_stage(project_id: str, payload: StageCreateRequest, user: User = Depe
         raise HTTPException(status_code=404, detail="Project not found")
     if not can_manage_project(session, user, project):
         raise HTTPException(status_code=403, detail="Stage edit denied")
+    owner_membership = session.get(TeamMember, (project.team_id, payload.owner_id))
+    owner = session.get(User, payload.owner_id)
+    if not owner_membership or not owner or not owner.is_active:
+        raise HTTPException(status_code=422, detail="Stage owner must be an active team member")
     if project.owner_id != payload.owner_id and not session.get(ProjectMember, (project.id, payload.owner_id)):
-        raise HTTPException(status_code=422, detail="Stage owner must be a project member")
+        session.add(ProjectMember(project_id=project.id, user_id=payload.owner_id, role=ProjectRole.MEMBER))
     position = len(session.exec(select(Stage).where(Stage.project_id == project.id)).all()) + 1
     session.add(Stage(id=f"stage-{uuid4().hex}", project_id=project.id, name=payload.name, position=position, status=StageStatus.PLANNED, owner_id=payload.owner_id, weight=payload.weight))
     session.commit()
@@ -315,6 +341,12 @@ def update_stage(stage_id: str, payload: StageUpdateRequest, user: User = Depend
     project = session.get(Project, stage.project_id)
     if not project or (not can_manage_project(session, user, project) and stage.owner_id != user.id):
         raise HTTPException(status_code=403, detail="Stage edit denied")
+    if payload.owner_id is not None and project.owner_id != payload.owner_id and not session.get(ProjectMember, (project.id, payload.owner_id)):
+        owner_membership = session.get(TeamMember, (project.team_id, payload.owner_id))
+        owner = session.get(User, payload.owner_id)
+        if not owner_membership or not owner or not owner.is_active:
+            raise HTTPException(status_code=422, detail="Stage owner must be an active team member")
+        session.add(ProjectMember(project_id=project.id, user_id=payload.owner_id, role=ProjectRole.MEMBER))
     if payload.status is not None:
         allowed = {StageStatus.PLANNED: {StageStatus.ACTIVE}, StageStatus.ACTIVE: {StageStatus.WAITING_REVIEW}, StageStatus.WAITING_REVIEW: {StageStatus.DONE, StageStatus.ACTIVE}, StageStatus.DONE: set()}
         if payload.status != StageStatus(stage.status) and payload.status not in allowed[StageStatus(stage.status)]:

@@ -970,6 +970,8 @@ export interface components {
              * @default
              */
             objective: string;
+            /** Owner Id */
+            owner_id?: string | null;
             /**
              * Next Milestone
              * @default
@@ -1035,6 +1037,8 @@ export interface components {
             client?: string | null;
             /** Objective */
             objective?: string | null;
+            /** Owner Id */
+            owner_id?: string | null;
             /** Next Milestone */
             next_milestone?: string | null;
             /** Due At */

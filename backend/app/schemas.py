@@ -421,6 +421,7 @@ class ProjectCreateRequest(ApiModel):
     name: str = Field(min_length=1, max_length=200)
     client: str = "内部"
     objective: str = ""
+    owner_id: str | None = None
     next_milestone: str = ""
     due_at: datetime | None = None
 
@@ -429,6 +430,7 @@ class ProjectUpdateRequest(ApiModel):
     name: str | None = None
     client: str | None = None
     objective: str | None = None
+    owner_id: str | None = None
     next_milestone: str | None = None
     due_at: datetime | None = None
 

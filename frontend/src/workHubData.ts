@@ -55,6 +55,7 @@ export type Project = {
   health: "正常" | "有风险" | "需关注";
   healthReasons?: string[];
   progress: number;
+  ownerId?: string;
   owner: string;
   nextMilestone: string;
   due: string;

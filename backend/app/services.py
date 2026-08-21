@@ -29,6 +29,12 @@ _OWNER_ACTIVE_STATUSES = {
     TaskStatus.WAITING_HUMAN_CONFIRMATION,
 }
 _CRITICAL_PRIORITIES = {"HIGH", "CRITICAL", "URGENT"}
+_STAGE_STATUS_PROGRESS = {
+    StageStatus.PLANNED: 0,
+    StageStatus.ACTIVE: 10,
+    StageStatus.WAITING_REVIEW: 90,
+    StageStatus.DONE: 100,
+}
 
 
 def _utc(value: datetime) -> datetime:
@@ -190,13 +196,19 @@ def project_reads(session: Session, project_ids: list[str]) -> list[ProjectRead]
         stage_reads: list[StageRead] = []
         for stage in project_stages:
             stage_tasks = tasks_by_stage[stage.id]
-            progress = round(sum(task.progress for task in stage_tasks) / len(stage_tasks)) if stage_tasks else 0
+            task_progress = round(sum(task.progress for task in stage_tasks) / len(stage_tasks)) if stage_tasks else 0
+            progress = max(task_progress, _STAGE_STATUS_PROGRESS[StageStatus(stage.status)])
             stage_external_levels = [reminder_level(dependency_by_task[task.id].expected_at, datetime.now(timezone.utc)) for task in stage_tasks if task.id in dependency_by_task]
             stage_health, _stage_reasons = assess_project_health(stage_tasks, stage_external_levels, datetime.now(timezone.utc), progress=progress)
             stage_reads.append(StageRead(id=stage.id, name=stage.name, position=stage.position, status=StageStatus(stage.status), progress=progress, health=stage_health))
         project_tasks = [task for task in tasks if task.project_id == project.id]
-        total_weight = sum(stage.weight for stage in project_stages)
-        progress = round(sum(stage_read.progress * stage.weight for stage_read, stage in zip(stage_reads, project_stages)) / total_weight) if total_weight else round(sum(task.progress for task in project_tasks) / len(project_tasks)) if project_tasks else 0
+        unstaged_tasks = [task for task in project_tasks if task.stage_id is None]
+        stage_weight = sum(stage.weight for stage in project_stages)
+        unstaged_weight = len(unstaged_tasks)
+        total_weight = stage_weight + unstaged_weight
+        weighted_progress = sum(stage_read.progress * stage.weight for stage_read, stage in zip(stage_reads, project_stages))
+        weighted_progress += sum(task.progress for task in unstaged_tasks)
+        progress = round(weighted_progress / total_weight) if total_weight else 0
         external_levels = [reminder_level(dependency_by_task[task.id].expected_at, datetime.now(timezone.utc)) for task in project_tasks if task.id in dependency_by_task]
         health, health_reasons = assess_project_health(project_tasks, external_levels, datetime.now(timezone.utc), project_due_at=project.due_at, progress=progress, owner_names=names)
         current_stage = next((stage.name for stage in project_stages if stage.status == StageStatus.ACTIVE), project_stages[0].name if project_stages else "未设置")

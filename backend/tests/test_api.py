@@ -316,6 +316,72 @@ def test_project_stage_task_crud_and_weighted_aggregation() -> None:
         assert len([item for item in contribution_rows if item["task_id"] == task_id]) == 1
 
 
+def test_project_owner_selection_and_stage_status_progress() -> None:
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        created = client.post(
+            "/api/projects",
+            headers=headers,
+            json={"team_id": "team-quanyi", "name": "负责人选择项目", "client": "内部", "owner_id": "u-member"},
+        )
+        assert created.status_code == 200
+        project = created.json()
+        assert project["owner_id"] == "u-member"
+        assert project["owner_name"] == "廖婉琛"
+
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        assert any(item["id"] == project["id"] for item in client.get("/api/projects", headers=member_headers).json())
+
+        invalid = client.post(
+            "/api/projects",
+            headers=headers,
+            json={"team_id": "team-quanyi", "name": "非法负责人", "client": "内部", "owner_id": "missing-user"},
+        )
+        assert invalid.status_code == 422
+
+        staged = client.post(
+            f"/api/projects/{project['id']}/stages",
+            headers=headers,
+            json={"name": "空阶段", "owner_id": "u-member", "weight": 1},
+        )
+        assert staged.status_code == 200
+        stage_id = staged.json()["stages"][0]["id"]
+        assert staged.json()["progress"] == 0
+        active = client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "ACTIVE"})
+        assert active.json()["progress"] == 10
+        reviewing = client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "WAITING_REVIEW"})
+        assert reviewing.json()["progress"] == 90
+        done = client.patch(f"/api/stages/{stage_id}", headers=headers, json={"status": "DONE"})
+        assert done.json()["progress"] == 100
+
+
+def test_unstaged_task_is_included_when_project_has_stages() -> None:
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        project = client.post("/api/projects", headers=headers, json={"name": "未归阶段任务聚合", "client": "内部"}).json()
+        stage = client.post(
+            f"/api/projects/{project['id']}/stages",
+            headers=headers,
+            json={"name": "已完成阶段", "owner_id": "u-ceo", "weight": 1},
+        ).json()["stages"][0]
+        client.patch(f"/api/stages/{stage['id']}", headers=headers, json={"status": "ACTIVE"})
+        client.patch(f"/api/stages/{stage['id']}", headers=headers, json={"status": "WAITING_REVIEW"})
+        client.patch(f"/api/stages/{stage['id']}", headers=headers, json={"status": "DONE"})
+        task = client.post(
+            "/api/tasks",
+            headers=headers,
+            json={"project_id": project["id"], "stage_id": None, "title": "未归阶段任务", "deliverable": "结果", "acceptance": "验收", "owner_id": "u-ceo", "reviewer_id": "u-ceo", "execution_mode": "HUMAN"},
+        ).json()
+        assert client.get(f"/api/projects/{project['id']}", headers=headers).json()["progress"] == 50
+        client.post(f"/api/tasks/{task['id']}/actions/START", headers={**headers, "Idempotency-Key": "unstaged-start"}, json={"expected_version": 1})
+        client.post(f"/api/tasks/{task['id']}/actions/SUBMIT", headers={**headers, "Idempotency-Key": "unstaged-submit"}, json={"expected_version": 2, "summary": "完成"})
+        client.post(f"/api/tasks/{task['id']}/actions/APPROVE", headers={**headers, "Idempotency-Key": "unstaged-approve"}, json={"expected_version": 3})
+        assert client.get(f"/api/projects/{project['id']}", headers=headers).json()["progress"] == 100
+
+
 def test_invitation_activation_and_real_team_membership() -> None:
     with TestClient(app) as client:
         ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()

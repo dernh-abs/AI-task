@@ -3003,6 +3003,17 @@
             "title": "Objective",
             "default": ""
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "next_milestone": {
             "type": "string",
             "title": "Next Milestone",
@@ -3194,6 +3205,17 @@
               }
             ],
             "title": "Objective"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "next_milestone": {
             "anyOf": [
