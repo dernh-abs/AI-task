@@ -75,8 +75,13 @@ if (!personalAi.includes("个人 AI 助手 · 暂未开放") || !personalAi.incl
   throw new Error("未接入的个人 AI 必须明确关闭写入口");
 }
 
-for (const route of ["HelpCenter", "KnowledgeSpace", "AssetLibrary", "CapabilityLibrary"]) {
+for (const route of ["HelpCenter", "AssetLibrary", "CapabilityLibrary"]) {
   requireText(`function ${route}(){return <PreviewOnlyPage`, `${route} 必须保持只读预览`);
+}
+
+const knowledgeSpace = between("function KnowledgeSpace", "function LegacyKnowledgeSpace");
+if (!knowledgeSpace.includes("fetchWeComStatus") || !knowledgeSpace.includes("createWeComDocument") || !knowledgeSpace.includes("status?.connected")) {
+  throw new Error("KnowledgeSpace 必须通过真实企业微信接口检测连接并创建文档");
 }
 
 if (!authSource.includes("if(inviteToken)return <ActivationPage") || !authSource.includes("currentUser={user}")) {

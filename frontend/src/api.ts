@@ -24,6 +24,8 @@ export type ApiInvitation = components["schemas"]["InvitationPublicRead"];
 export type ApiInvitationCreated = components["schemas"]["InvitationCreatedRead"];
 export type ApiInvitationAdmin = components["schemas"]["InvitationAdminRead"];
 export type ApiTeam = components["schemas"]["TeamRead"];
+export type ApiWeComStatus = components["schemas"]["WeComStatusRead"];
+export type ApiWeComDocument = components["schemas"]["WeComDocumentRead"];
 
 export class ApiError extends Error { constructor(public status:number, message:string) { super(message); } }
 export const tokenStore = {
@@ -62,6 +64,8 @@ export const fetchTeams=()=>request<ApiTeam[]>("/teams");
 export const createTeamInvitation=(teamId:string,payload:components["schemas"]["InvitationCreateRequest"])=>request<ApiInvitationCreated>(`/teams/${teamId}/invitations`,{method:"POST",body:JSON.stringify(payload)});
 export const fetchTeamInvitations=(teamId:string)=>request<ApiInvitationAdmin[]>(`/teams/${teamId}/invitations`);
 export const revokeTeamInvitation=(teamId:string,invitationId:string)=>request<ApiInvitationAdmin>(`/teams/${teamId}/invitations/${invitationId}/revoke`,{method:"POST"});
+export const fetchWeComStatus=()=>request<ApiWeComStatus>("/integrations/wecom/status");
+export const createWeComDocument=(payload:components["schemas"]["WeComDocumentCreateRequest"])=>request<ApiWeComDocument>("/integrations/wecom/documents",{method:"POST",body:JSON.stringify(payload)});
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
 export const fetchProjectMembers=(projectId:string)=>request<ApiProjectMember[]>(`/projects/${projectId}/members`);
 export const createProject=(payload:components["schemas"]["ProjectCreateRequest"])=>request<ApiProject>("/projects",{method:"POST",body:JSON.stringify(payload)});

@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createProjectConversation, createStage, createTask, createTeamInvitation, fetchAgentRuns, fetchAllAgentRuns, fetchCandidates, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectChatMessages, fetchProjectConversations, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, ignoreCandidate, performTaskAction, revokeTeamInvitation, sendProjectChatMessage, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectChatMessage, type ApiProjectConversation, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createProjectConversation, createStage, createTask, createTeamInvitation, createWeComDocument, fetchAgentRuns, fetchAllAgentRuns, fetchCandidates, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectChatMessages, fetchProjectConversations, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, fetchWeComStatus, ignoreCandidate, performTaskAction, revokeTeamInvitation, sendProjectChatMessage, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectChatMessage, type ApiProjectConversation, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam, type ApiWeComDocument, type ApiWeComStatus } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -1687,7 +1687,48 @@ function LegacyHelpCenter() {
   );
 }
 
-function KnowledgeSpace(){return <PreviewOnlyPage title="知识空间" description="当前为只读预览；新建、编辑、自动保存和发布入口已关闭。" items={["知识页面与版本模型","自动保存和冲突处理","发布快照与权限"]}/>;}
+function KnowledgeSpace(){
+  const { notify } = useHub();
+  const [status,setStatus] = useState<ApiWeComStatus|null>(null);
+  const [loading,setLoading] = useState(true);
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState("");
+  const [docName,setDocName] = useState("");
+  const [docType,setDocType] = useState<3|4|10>(10);
+  const [adminUsers,setAdminUsers] = useState("");
+  const [spaceId,setSpaceId] = useState("");
+  const [created,setCreated] = useState<ApiWeComDocument|null>(null);
+  useEffect(()=>{let active=true;fetchWeComStatus().then(value=>{if(active)setStatus(value);}).catch(reason=>{if(active)setError(reason instanceof ApiError?reason.message:"连接状态读取失败");}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[]);
+  const submit = async(event:FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(""); setCreated(null);
+    try {
+      const result=await createWeComDocument({doc_name:docName.trim(),doc_type:docType,admin_users:adminUsers.split(",").map(value=>value.trim()).filter(Boolean),spaceid:spaceId.trim()||null,fatherid:null});
+      setCreated(result); setDocName(""); notify("企业微信文档已创建");
+    } catch(reason) { setError(reason instanceof ApiError?reason.message:"文档创建失败"); }
+    finally { setBusy(false); }
+  };
+  return <div className="wecom-knowledge-page">
+    <PageHeader title="知识空间" description="通过企业微信自建应用连接智能文档；access-token 仅在服务端缓存，不会发送到浏览器。" />
+    <div className="wecom-knowledge-grid">
+      <section className="panel wecom-connector-card">
+        <header><span className={`wecom-connector-icon${status?.connected?" connected":""}`}><BookOpen size={24}/></span><div><span className="section-kicker">企业微信文档</span><h2>智能文档连接</h2></div></header>
+        {loading?<p className="wecom-status-copy">正在检查连接…</p>:<div className={`wecom-status ${status?.connected?"connected":"disconnected"}`}>{status?.connected?<CheckCircle2 size={17}/>:<AlertCircle size={17}/>}<span><strong>{status?.connected?"已连接":"尚未可用"}</strong><small>{status?.detail||error}</small></span></div>}
+        <ul><li><Check size={15}/> access-token 由服务端申请并提前刷新</li><li><Check size={15}/> 密钥、授权码和 token 均不进入前端</li><li><Check size={15}/> 支持文档、表格和智能表格</li></ul>
+      </section>
+      <section className="panel wecom-create-card">
+        <header><div><span className="section-kicker">CREATE DOCUMENT</span><h2>新建企业微信文档</h2><p>管理员填写企业微信 UserID 后，可直接成为文档管理员。</p></div></header>
+        <form className="form-stack" onSubmit={submit}>
+          <label><span>文档名称</span><input value={docName} onChange={event=>setDocName(event.target.value)} placeholder="例如：项目周报"/></label>
+          <div className="form-grid"><label><span>文档类型</span><select value={docType} onChange={event=>setDocType(Number(event.target.value) as 3|4|10)}><option value={10}>智能表格</option><option value={3}>文档</option><option value={4}>表格</option></select></label><label><span>空间 ID（可选）</span><input value={spaceId} onChange={event=>setSpaceId(event.target.value)} placeholder="spaceid"/></label></div>
+          <label><span>文档管理员 UserID（可选，逗号分隔）</span><input value={adminUsers} onChange={event=>setAdminUsers(event.target.value)} placeholder="zhangsan,lisi"/></label>
+          {error&&<p className="login-error">{error}</p>}
+          {created&&<div className="wecom-created-result"><CheckCircle2 size={18}/><span><strong>创建成功</strong><small>文档 ID：{created.docid}</small></span>{created.doc_url&&<a href={created.doc_url} target="_blank" rel="noreferrer">打开文档 <ArrowRight size={14}/></a>}</div>}
+          <button className="button primary" disabled={busy||!docName.trim()||!status?.connected}><FilePlus2 size={16}/>{busy?"正在创建…":"创建文档"}</button>
+        </form>
+      </section>
+    </div>
+  </div>;
+}
 
 function LegacyKnowledgeSpace() {
   const { knowledgePages, setKnowledgePages, assets, setAssets, notify, openPreview, openAsset } = useHub();
@@ -3044,6 +3085,7 @@ function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:(
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
   const [activationLink,setActivationLink] = useState("");
+  const [delivery,setDelivery] = useState<"SENT"|"NOT_CONFIGURED"|"FAILED"|"">("");
   const submit = async(event:FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
     try {
@@ -3051,14 +3093,15 @@ function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:(
       const url = new URL(import.meta.env.BASE_URL || "/",window.location.origin);
       url.searchParams.set("invite",result.activation_token);
       setActivationLink(url.toString());
+      setDelivery(result.email_delivery);
       onCreated();
-      notify("一次性邀请链接已生成，有效期 72 小时");
+      notify(result.email_delivery==="SENT"?"邀请邮件已发送，有效期 72 小时":"邀请已创建，请复制链接发送给对方");
     } catch(reason) { setError(reason instanceof ApiError ? reason.message : "邀请创建失败"); }
     finally { setBusy(false); }
   };
   const copy = async() => { await navigator.clipboard.writeText(activationLink); notify("邀请链接已复制"); };
   return <AppModal title={`邀请成员加入「${team.name}」`} subtitle="邀请链接只能使用一次；对方激活后才会成为真实团队成员。" onClose={onClose}>
-    {!activationLink?<form className="form-stack" onSubmit={submit}><label><span>受邀邮箱</span><input autoFocus type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="name@company.com"/></label><label><span>团队角色</span><select value={role} onChange={(event)=>setRole(event.target.value as "MEMBER"|"CEO")}><option value="MEMBER">团队成员</option><option value="CEO">团队管理员</option></select></label>{error&&<p className="login-error">{error}</p>}<div className="permission-note"><ShieldCheck size={17}/><span>本阶段不会自动发送邮件，请复制链接并通过可信渠道单独发送给受邀成员。</span></div><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy||!email.includes("@")}><UserPlus size={16}/>{busy?"正在创建…":"生成邀请链接"}</button></footer></form>:<div className="form-stack"><div className="permission-note"><CheckCircle2 size={17}/><span>邀请已创建。对方使用后链接立即失效。</span></div><label><span>一次性激活链接</span><textarea readOnly value={activationLink}/></label><footer className="modal-actions"><button className="button secondary" onClick={onClose}>完成</button><button className="button primary" onClick={copy}>复制邀请链接</button></footer></div>}
+    {!activationLink?<form className="form-stack" onSubmit={submit}><label><span>受邀邮箱</span><input autoFocus type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="name@company.com"/></label><label><span>团队角色</span><select value={role} onChange={(event)=>setRole(event.target.value as "MEMBER"|"CEO")}><option value="MEMBER">团队成员</option><option value="CEO">团队管理员</option></select></label>{error&&<p className="login-error">{error}</p>}<div className="permission-note"><ShieldCheck size={17}/><span>系统会尝试发送一次性注册邮件；若邮件服务异常，邀请仍会创建并提供复制链接兜底。</span></div><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy||!email.includes("@")}><UserPlus size={16}/>{busy?"正在发送…":"发送注册邀请"}</button></footer></form>:<div className="form-stack"><div className={`permission-note${delivery==="SENT"?" success":" warning"}`}>{delivery==="SENT"?<CheckCircle2 size={17}/>:<AlertCircle size={17}/>}<span>{delivery==="SENT"?`邀请邮件已发送至 ${email}。对方使用后链接立即失效。`:delivery==="FAILED"?"邀请已创建，但邮件发送失败。请复制链接并通过可信渠道发送。":"邀请已创建，但邮件服务尚未配置。请复制链接发送给对方。"}</span></div><label><span>一次性激活链接</span><textarea readOnly value={activationLink}/></label><footer className="modal-actions"><button className="button secondary" onClick={onClose}>完成</button><button className="button primary" onClick={copy}>复制邀请链接</button></footer></div>}
   </AppModal>;
 }
 

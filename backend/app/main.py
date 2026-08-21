@@ -20,14 +20,16 @@ from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
+from .email_delivery import send_invitation_email
 from .model_gateway import GatewayOutputError, extract_candidates, generate_project_chat_reply
-from .models import AgentRun, AgentRunStatus, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunStatus, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, Team, TeamMember, TeamRole, User, utc_now
 from .permissions import can_contribute_project, can_manage_project, can_read_project, is_team_admin, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead, WeComDocumentCreateRequest, WeComDocumentRead, WeComStatusRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
 from .state_machine import DomainError, apply_task_action
+from .wecom_documents import WeComApiError, WeComDocumentsClient
 
 
 settings = load_settings()
@@ -95,7 +97,15 @@ def list_teams(user: User = Depends(get_current_user), session: Session = Depend
 @app.post("/api/teams/{team_id}/invitations", response_model=InvitationCreatedRead)
 def invite_team_member(team_id: str, payload: InvitationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationCreatedRead:
     invitation, token = create_team_invitation(session, team_id, payload, user)
-    return InvitationCreatedRead(id=invitation.id, email=invitation.email, team_id=invitation.team_id, expires_at=invitation.expires_at, activation_token=token)
+    team = session.get(Team, team_id)
+    email_delivery = send_invitation_email(
+        settings,
+        recipient=invitation.email,
+        team_name=team.name if team else "团队",
+        inviter_name=user.name,
+        activation_token=token,
+    )
+    return InvitationCreatedRead(id=invitation.id, email=invitation.email, team_id=invitation.team_id, expires_at=invitation.expires_at, activation_token=token, email_delivery=email_delivery)
 
 
 @app.get("/api/teams/{team_id}/invitations", response_model=list[InvitationAdminRead])
@@ -116,6 +126,47 @@ def inspect_invitation(token: str, session: Session = Depends(get_session)) -> I
 @app.post("/api/invitations/{token}/accept", response_model=TokenResponse)
 def activate_invitation(token: str, payload: InvitationAcceptRequest, session: Session = Depends(get_session)) -> TokenResponse:
     return accept_invitation(session, token, payload)
+
+
+@app.get("/api/integrations/wecom/status", response_model=WeComStatusRead)
+def wecom_status(_: User = Depends(get_current_user)) -> WeComStatusRead:
+    configured, connected, detail = WeComDocumentsClient(settings).connection_status()
+    return WeComStatusRead(configured=configured, connected=connected, detail=detail)
+
+
+@app.post("/api/integrations/wecom/documents", response_model=WeComDocumentRead)
+def create_wecom_document(payload: WeComDocumentCreateRequest, _: User = Depends(get_current_user)) -> WeComDocumentRead:
+    try:
+        result = WeComDocumentsClient(settings).create_document(
+            doc_name=payload.doc_name,
+            doc_type=payload.doc_type,
+            admin_users=payload.admin_users,
+            spaceid=payload.spaceid,
+            fatherid=payload.fatherid,
+        )
+    except WeComApiError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    docid = result.get("docid")
+    if not isinstance(docid, str) or not docid:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="企业微信未返回文档 ID")
+    doc_url = result.get("doc_url") or result.get("url")
+    return WeComDocumentRead(docid=docid, doc_url=doc_url if isinstance(doc_url, str) else None, doc_name=payload.doc_name, doc_type=payload.doc_type)
+
+
+@app.get("/api/integrations/wecom/documents/{docid}", response_model=WeComDocumentRead)
+def get_wecom_document(docid: str, _: User = Depends(get_current_user)) -> WeComDocumentRead:
+    try:
+        result = WeComDocumentsClient(settings).get_document_base_info(docid)
+    except WeComApiError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    info = result.get("doc_base_info") if isinstance(result.get("doc_base_info"), dict) else result
+    doc_url = info.get("doc_url") or info.get("url")
+    return WeComDocumentRead(
+        docid=str(info.get("docid") or docid),
+        doc_url=doc_url if isinstance(doc_url, str) else None,
+        doc_name=info.get("doc_name") if isinstance(info.get("doc_name"), str) else None,
+        doc_type=info.get("doc_type") if isinstance(info.get("doc_type"), int) else None,
+    )
 
 
 @app.get("/api/projects", response_model=list[ProjectRead])

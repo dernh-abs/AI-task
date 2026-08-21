@@ -34,10 +34,27 @@ class Settings:
     ollama_model: str
     ai_daily_budget_usd: float
     auto_create_schema: bool
+    public_app_url: str
+    smtp_host: str | None
+    smtp_port: int
+    smtp_username: str | None
+    smtp_password: str | None
+    smtp_from_email: str | None
+    smtp_from_name: str
+    smtp_use_ssl: bool
+    smtp_use_starttls: bool
+    smtp_timeout_seconds: float
+    wecom_corp_id: str | None
+    wecom_agent_id: str | None
+    wecom_app_secret: str | None
 
 
 def load_settings() -> Settings:
     origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+    app_origin = os.getenv("APP_ORIGIN", "http://localhost:5173").rstrip("/")
+    app_base_path = "/" + os.getenv("APP_BASE_PATH", "/").strip("/")
+    if app_base_path != "/":
+        app_base_path += "/"
     return Settings(
         database_url=_database_url(os.getenv("DATABASE_URL", "sqlite:///./quanyi_mvp.db")),
         jwt_secret=os.getenv("JWT_SECRET", "local-development-secret-change-me"),
@@ -52,4 +69,17 @@ def load_settings() -> Settings:
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen2.5:7b"),
         ai_daily_budget_usd=float(os.getenv("AI_DAILY_BUDGET_USD", "1.0")),
         auto_create_schema=_as_bool(os.getenv("AUTO_CREATE_SCHEMA"), False),
+        public_app_url=(os.getenv("PUBLIC_APP_URL") or app_origin + app_base_path).rstrip("/") + "/",
+        smtp_host=os.getenv("SMTP_HOST") or None,
+        smtp_port=int(os.getenv("SMTP_PORT", "465")),
+        smtp_username=os.getenv("SMTP_USERNAME") or None,
+        smtp_password=os.getenv("SMTP_PASSWORD") or None,
+        smtp_from_email=os.getenv("SMTP_FROM_EMAIL") or None,
+        smtp_from_name=os.getenv("SMTP_FROM_NAME", "全意 AI 工作中枢"),
+        smtp_use_ssl=_as_bool(os.getenv("SMTP_USE_SSL"), True),
+        smtp_use_starttls=_as_bool(os.getenv("SMTP_USE_STARTTLS"), False),
+        smtp_timeout_seconds=float(os.getenv("SMTP_TIMEOUT_SECONDS", "10")),
+        wecom_corp_id=os.getenv("WECOM_CORP_ID") or None,
+        wecom_agent_id=os.getenv("WECOM_AGENT_ID") or None,
+        wecom_app_secret=os.getenv("WECOM_APP_SECRET") or None,
     )

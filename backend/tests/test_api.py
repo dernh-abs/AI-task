@@ -400,6 +400,7 @@ def test_invitation_activation_and_real_team_membership() -> None:
             json={"email": "new.member@quanyi.local", "role": "MEMBER", "project_id": "p-quanyi", "project_role": "MEMBER"},
         )
         assert created.status_code == 200
+        assert created.json()["email_delivery"] == "NOT_CONFIGURED"
         token = created.json()["activation_token"]
         inspected = client.get(f"/api/invitations/{token}")
         assert inspected.status_code == 200
@@ -418,6 +419,17 @@ def test_invitation_activation_and_real_team_membership() -> None:
         assert project_members.status_code == 200
         assert any(member["email"] == "new.member@quanyi.local" for member in project_members.json())
         assert client.post(f"/api/invitations/{token}/accept", json={"name": "重复成员", "password": "secure-member-2026"}).status_code == 410
+
+
+def test_wecom_status_requires_login_and_never_exposes_access_token() -> None:
+    with TestClient(app) as client:
+        assert client.get("/api/integrations/wecom/status").status_code == 401
+        login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        response = client.get("/api/integrations/wecom/status", headers={"Authorization": f"Bearer {login['access_token']}"})
+        assert response.status_code == 200
+        assert response.json()["configured"] is False
+        assert "access_token" not in response.json()
+        assert "access-token" not in response.text.lower()
 
 
 def test_non_admin_cannot_invite_team_member() -> None:

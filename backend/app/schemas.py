@@ -93,6 +93,37 @@ class InvitationCreatedRead(ApiModel):
     team_id: str
     expires_at: datetime
     activation_token: str
+    email_delivery: Literal["SENT", "NOT_CONFIGURED", "FAILED"]
+
+
+class WeComStatusRead(ApiModel):
+    provider: Literal["WECOM"] = "WECOM"
+    configured: bool
+    connected: bool
+    detail: str
+
+
+class WeComDocumentCreateRequest(ApiModel):
+    doc_name: str = Field(min_length=1, max_length=100)
+    doc_type: Literal[3, 4, 10] = 10
+    admin_users: list[str] = Field(default_factory=list, max_length=100)
+    spaceid: str | None = Field(default=None, max_length=128)
+    fatherid: str | None = Field(default=None, max_length=128)
+
+    @field_validator("doc_name")
+    @classmethod
+    def clean_doc_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("文档名称不能为空")
+        return cleaned
+
+
+class WeComDocumentRead(ApiModel):
+    docid: str
+    doc_url: str | None = None
+    doc_name: str | None = None
+    doc_type: int | None = None
 
 
 class InvitationAdminRead(ApiModel):

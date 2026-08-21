@@ -399,6 +399,116 @@
         }
       }
     },
+    "/api/integrations/wecom/status": {
+      "get": {
+        "summary": "Wecom Status",
+        "operationId": "wecom_status_api_integrations_wecom_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeComStatusRead"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/wecom/documents": {
+      "post": {
+        "summary": "Create Wecom Document",
+        "operationId": "create_wecom_document_api_integrations_wecom_documents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeComDocumentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeComDocumentRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/integrations/wecom/documents/{docid}": {
+      "get": {
+        "summary": "Get Wecom Document",
+        "operationId": "get_wecom_document_api_integrations_wecom_documents__docid__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "docid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Docid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeComDocumentRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects": {
       "get": {
         "summary": "List Projects",
@@ -2702,6 +2812,15 @@
           "activation_token": {
             "type": "string",
             "title": "Activation Token"
+          },
+          "email_delivery": {
+            "type": "string",
+            "enum": [
+              "SENT",
+              "NOT_CONFIGURED",
+              "FAILED"
+            ],
+            "title": "Email Delivery"
           }
         },
         "type": "object",
@@ -2710,7 +2829,8 @@
           "email",
           "team_id",
           "expires_at",
-          "activation_token"
+          "activation_token",
+          "email_delivery"
         ],
         "title": "InvitationCreatedRead"
       },
@@ -4018,6 +4138,138 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WeComDocumentCreateRequest": {
+        "properties": {
+          "doc_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Doc Name"
+          },
+          "doc_type": {
+            "type": "integer",
+            "enum": [
+              3,
+              4,
+              10
+            ],
+            "title": "Doc Type",
+            "default": 10
+          },
+          "admin_users": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Admin Users"
+          },
+          "spaceid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spaceid"
+          },
+          "fatherid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fatherid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "doc_name"
+        ],
+        "title": "WeComDocumentCreateRequest"
+      },
+      "WeComDocumentRead": {
+        "properties": {
+          "docid": {
+            "type": "string",
+            "title": "Docid"
+          },
+          "doc_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Url"
+          },
+          "doc_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Name"
+          },
+          "doc_type": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "docid"
+        ],
+        "title": "WeComDocumentRead"
+      },
+      "WeComStatusRead": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "const": "WECOM",
+            "title": "Provider",
+            "default": "WECOM"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured",
+          "connected",
+          "detail"
+        ],
+        "title": "WeComStatusRead"
       }
     },
     "securitySchemes": {

@@ -34,6 +34,21 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
       AI_DAILY_BUDGET_USD: ${AI_DAILY_BUDGET_USD:-1.0}
+      APP_ORIGIN: ${APP_ORIGIN:-http://127.0.0.1}
+      APP_BASE_PATH: ${APP_BASE_PATH:-/}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-全意 AI 工作中枢}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-true}
+      SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-false}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-10}
+      WECOM_CORP_ID: ${WECOM_CORP_ID:-}
+      WECOM_AGENT_ID: ${WECOM_AGENT_ID:-}
+      WECOM_APP_SECRET: ${WECOM_APP_SECRET:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

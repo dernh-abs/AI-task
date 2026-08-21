@@ -10706,3 +10706,33 @@ a:focus-visible {
 .hub-data-state.error { color: #b42318; }
 .hub-data-state button { border: 1px solid #d7deea; border-radius: 8px; padding: 8px 12px; background: white; cursor: pointer; }
 .sidebar-signout { width: 100%; border: 0; background: transparent; color: #7d8798; font-size: 11px; text-align: left; cursor: pointer; padding: 4px 10px; }
+
+.wecom-knowledge-page { min-height: 100%; padding-bottom: 32px; }
+.wecom-knowledge-grid { display: grid; grid-template-columns: minmax(280px, .78fr) minmax(420px, 1.22fr); gap: 18px; }
+.wecom-connector-card,
+.wecom-create-card { padding: 22px; }
+.wecom-connector-card > header { display: flex; align-items: center; gap: 13px; }
+.wecom-connector-card h2,
+.wecom-create-card h2 { margin: 3px 0 0; font-size: 18px; }
+.wecom-connector-icon { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 14px; background: #eef2f7; color: #7b879b; }
+.wecom-connector-icon.connected { background: #e8f8ef; color: #12a566; }
+.wecom-status { display: flex; align-items: flex-start; gap: 9px; margin: 22px 0 18px; padding: 13px; border-radius: 10px; }
+.wecom-status.connected { background: #edfbf3; color: #07884f; }
+.wecom-status.disconnected { background: #fff5ed; color: #b54708; }
+.wecom-status > span,
+.wecom-created-result > span { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.wecom-status small,
+.wecom-created-result small { margin-top: 3px; color: inherit; opacity: .78; line-height: 1.45; }
+.wecom-status-copy { margin: 22px 0; color: var(--hub-muted); }
+.wecom-connector-card ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; color: var(--hub-muted); font-size: 13px; }
+.wecom-connector-card li { display: flex; align-items: center; gap: 8px; }
+.wecom-create-card > header p { margin: 6px 0 18px; color: var(--hub-muted); font-size: 13px; }
+.wecom-create-card .button.primary { justify-content: center; align-self: flex-start; min-width: 150px; }
+.wecom-created-result { display: flex; align-items: center; gap: 9px; padding: 12px; border: 1px solid #b9ebce; border-radius: 10px; background: #f0fcf5; color: #087c49; }
+.wecom-created-result a { display: inline-flex; flex: none; align-items: center; gap: 4px; color: var(--hub-blue); font-size: 13px; }
+.permission-note.warning { background: #fff7ed; color: #9a5200; }
+.permission-note.success { background: #edfbf3; color: #087c49; }
+
+@media (max-width: 900px) {
+  .wecom-knowledge-grid { grid-template-columns: 1fr; }
+}

@@ -158,6 +158,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/wecom/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wecom Status */
+        get: operations["wecom_status_api_integrations_wecom_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/wecom/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Wecom Document */
+        post: operations["create_wecom_document_api_integrations_wecom_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/wecom/documents/{docid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Wecom Document */
+        get: operations["get_wecom_document_api_integrations_wecom_documents__docid__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -855,6 +906,11 @@ export interface components {
             expires_at: string;
             /** Activation Token */
             activation_token: string;
+            /**
+             * Email Delivery
+             * @enum {string}
+             */
+            email_delivery: "SENT" | "NOT_CONFIGURED" | "FAILED";
         };
         /** InvitationPublicRead */
         InvitationPublicRead: {
@@ -1319,6 +1375,49 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** WeComDocumentCreateRequest */
+        WeComDocumentCreateRequest: {
+            /** Doc Name */
+            doc_name: string;
+            /**
+             * Doc Type
+             * @default 10
+             * @enum {integer}
+             */
+            doc_type: 3 | 4 | 10;
+            /** Admin Users */
+            admin_users?: string[];
+            /** Spaceid */
+            spaceid?: string | null;
+            /** Fatherid */
+            fatherid?: string | null;
+        };
+        /** WeComDocumentRead */
+        WeComDocumentRead: {
+            /** Docid */
+            docid: string;
+            /** Doc Url */
+            doc_url?: string | null;
+            /** Doc Name */
+            doc_name?: string | null;
+            /** Doc Type */
+            doc_type?: number | null;
+        };
+        /** WeComStatusRead */
+        WeComStatusRead: {
+            /**
+             * Provider
+             * @default WECOM
+             * @constant
+             */
+            provider: "WECOM";
+            /** Configured */
+            configured: boolean;
+            /** Connected */
+            connected: boolean;
+            /** Detail */
+            detail: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1607,6 +1706,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    wecom_status_api_integrations_wecom_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeComStatusRead"];
+                };
+            };
+        };
+    };
+    create_wecom_document_api_integrations_wecom_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WeComDocumentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeComDocumentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_wecom_document_api_integrations_wecom_documents__docid__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                docid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeComDocumentRead"];
                 };
             };
             /** @description Validation Error */
