@@ -49,6 +49,7 @@ export type Candidate = {
 
 export type Project = {
   id: string;
+  teamId?: string;
   name: string;
   client: string;
   stage: string;

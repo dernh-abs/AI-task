@@ -996,6 +996,8 @@ export interface components {
         ProjectRead: {
             /** Id */
             id: string;
+            /** Team Id */
+            team_id: string;
             /** Name */
             name: string;
             /** Client */
@@ -1270,7 +1272,7 @@ export interface components {
             id: string;
             /** Name */
             name: string;
-            role: components["schemas"]["TeamRole"];
+            role: components["schemas"]["TeamRole"] | null;
             /** Members */
             members: components["schemas"]["TeamMemberRead"][];
             /** Project Names */

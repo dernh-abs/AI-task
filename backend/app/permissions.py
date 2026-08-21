@@ -15,10 +15,16 @@ def can_manage_project(session: Session, user: User, project: Project) -> bool:
 
 
 def can_read_project(session: Session, user: User, project: Project) -> bool:
+    # Project visibility is global for every authenticated, active account.
+    # Mutation permissions remain scoped by can_manage_project and task roles.
+    return user.is_active
+
+
+def can_contribute_project(session: Session, user: User, project: Project) -> bool:
     return session.get(TeamMember, (project.team_id, user.id)) is not None
 
 
 def readable_project_ids(session: Session, user: User) -> list[str]:
-    team_ids = session.exec(select(TeamMember.team_id).where(TeamMember.user_id == user.id)).all()
-    project_ids = set(session.exec(select(Project.id).where(Project.team_id.in_(team_ids))).all()) if team_ids else set()
-    return sorted(project_ids)
+    if not user.is_active:
+        return []
+    return sorted(session.exec(select(Project.id)).all())

@@ -185,12 +185,13 @@ def accept_invitation(session: Session, token: str, payload: InvitationAcceptReq
 
 
 def readable_teams(session: Session, user: User) -> list[TeamRead]:
-    own_memberships = session.exec(select(TeamMember).where(TeamMember.user_id == user.id)).all()
+    own_memberships = {
+        membership.team_id: membership
+        for membership in session.exec(select(TeamMember).where(TeamMember.user_id == user.id)).all()
+    }
     rows: list[TeamRead] = []
-    for own in own_memberships:
-        team = session.get(Team, own.team_id)
-        if not team:
-            continue
+    for team in session.exec(select(Team).order_by(Team.created_at.asc())).all():
+        own = own_memberships.get(team.id)
         memberships = session.exec(select(TeamMember).where(TeamMember.team_id == team.id)).all()
         member_rows: list[TeamMemberRead] = []
         for membership in memberships:
@@ -198,7 +199,7 @@ def readable_teams(session: Session, user: User) -> list[TeamRead]:
             if member:
                 member_rows.append(TeamMemberRead(id=member.id, email=member.email, name=member.name, role=membership.role, is_active=member.is_active))
         projects = session.exec(select(Project).where(Project.team_id == team.id)).all()
-        rows.append(TeamRead(id=team.id, name=team.name, role=own.role, members=member_rows, project_names=[project.name for project in projects]))
+        rows.append(TeamRead(id=team.id, name=team.name, role=own.role if own else None, members=member_rows, project_names=[project.name for project in projects]))
     return rows
 
 

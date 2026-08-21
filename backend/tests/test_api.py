@@ -428,7 +428,7 @@ def test_non_admin_cannot_invite_team_member() -> None:
         assert response.status_code == 403
 
 
-def test_global_ceo_role_does_not_cross_team_boundary() -> None:
+def test_all_authenticated_users_can_read_cross_team_projects_but_cannot_manage_them() -> None:
     with Session(engine) as session:
         observer = session.get(User, "u-observer")
         assert observer is not None
@@ -440,7 +440,17 @@ def test_global_ceo_role_does_not_cross_team_boundary() -> None:
     with TestClient(app) as client:
         login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
         headers = {"Authorization": f"Bearer {login['access_token']}"}
-        assert client.get("/api/projects/project-isolated", headers=headers).status_code == 403
+        project = client.get("/api/projects/project-isolated", headers=headers)
+        assert project.status_code == 200
+        assert project.json()["team_id"] == "team-isolated"
+        tasks = client.get("/api/tasks", headers=headers)
+        assert tasks.status_code == 200
+        teams = client.get("/api/teams", headers=headers)
+        assert teams.status_code == 200
+        isolated = next(team for team in teams.json() if team["id"] == "team-isolated")
+        assert isolated["role"] is None
+        assert client.get("/api/projects/project-isolated/conversations", headers=headers).status_code == 200
+        assert client.post("/api/projects/project-isolated/conversations", headers=headers, json={"title": "不允许跨团队写入"}).status_code == 403
         assert client.post("/api/teams/team-isolated/invitations", headers=headers, json={"email": "isolated@quanyi.local"}).status_code == 403
         assert client.post("/api/projects", headers=headers, json={"team_id": "team-isolated", "name": "越权项目"}).status_code == 403
 

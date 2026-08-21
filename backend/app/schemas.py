@@ -148,7 +148,7 @@ class TeamMemberRead(ApiModel):
 class TeamRead(ApiModel):
     id: str
     name: str
-    role: TeamRole
+    role: TeamRole | None
     members: list[TeamMemberRead]
     project_names: list[str]
 
@@ -172,6 +172,7 @@ class StageRead(ApiModel):
 
 class ProjectRead(ApiModel):
     id: str
+    team_id: str
     name: str
     client: str
     objective: str

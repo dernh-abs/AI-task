@@ -22,7 +22,7 @@ from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
 from .model_gateway import GatewayOutputError, extract_candidates, generate_project_chat_reply
 from .models import AgentRun, AgentRunStatus, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, TeamMember, TeamRole, User, utc_now
-from .permissions import can_manage_project, can_read_project, is_team_admin, readable_project_ids
+from .permissions import can_contribute_project, can_manage_project, can_read_project, is_team_admin, readable_project_ids
 from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
@@ -149,13 +149,15 @@ def list_project_members(project_id: str, user: User = Depends(get_current_user)
     return rows
 
 
-def _conversation_for_user(conversation_id: str, user: User, session: Session) -> ProjectConversation:
+def _conversation_for_user(conversation_id: str, user: User, session: Session, require_contributor: bool = False) -> ProjectConversation:
     conversation = session.get(ProjectConversation, conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Project conversation not found")
     project = session.get(Project, conversation.project_id)
     if not project or not can_read_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project conversation access denied")
+    if require_contributor and not can_contribute_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project contribution access denied")
     return conversation
 
 
@@ -191,7 +193,7 @@ def list_project_conversations(project_id: str, user: User = Depends(get_current
 @app.post("/api/projects/{project_id}/conversations", response_model=ProjectConversationRead)
 def create_project_conversation(project_id: str, payload: ProjectConversationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> ProjectConversationRead:
     project = session.get(Project, project_id)
-    if not project or not can_read_project(session, user, project):
+    if not project or not can_contribute_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project access denied")
     conversation = ProjectConversation(id=f"conversation-{uuid4().hex}", project_id=project.id, title=payload.title.strip(), created_by=user.id)
     session.add(conversation)
@@ -215,7 +217,7 @@ def send_project_chat_message(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ProjectChatSendResponse:
-    conversation = _conversation_for_user(conversation_id, user, session)
+    conversation = _conversation_for_user(conversation_id, user, session, require_contributor=True)
     existing_reply = session.exec(select(ProjectChatMessage).where(ProjectChatMessage.request_key == idempotency_key)).first()
     if existing_reply:
         if existing_reply.conversation_id != conversation.id or not existing_reply.reply_to_message_id:
@@ -361,7 +363,7 @@ def update_stage(stage_id: str, payload: StageUpdateRequest, user: User = Depend
 @app.post("/api/tasks", response_model=TaskRead)
 def create_task(payload: TaskCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> TaskRead:
     project = session.get(Project, payload.project_id)
-    if not project or not can_read_project(session, user, project):
+    if not project or not can_contribute_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project access denied")
     if not can_manage_project(session, user, project) and payload.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Members can only create tasks assigned to themselves")
@@ -455,7 +457,7 @@ def create_candidate_extraction(payload: CandidateExtractionRequest, user: User 
     project = session.get(Project, payload.project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if not can_read_project(session, user, project):
+    if not can_contribute_project(session, user, project):
         raise HTTPException(status_code=403, detail="Project access denied")
     try:
         gateway = extract_candidates(session, project.id, payload.content)
@@ -490,7 +492,8 @@ def list_candidates(project_id: str | None = None, user: User = Depends(get_curr
 @app.patch("/api/candidates/{candidate_id}", response_model=CandidateRead)
 def update_candidate(candidate_id: str, payload: CandidateUpdateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateRead:
     candidate = session.get(CandidateTask, candidate_id)
-    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+    project = session.get(Project, candidate.project_id) if candidate else None
+    if not candidate or not project or not can_contribute_project(session, user, project):
         raise HTTPException(status_code=404, detail="Candidate not found")
     if CandidateStatus(candidate.status) != CandidateStatus.ACTIVE:
         raise HTTPException(status_code=409, detail={"code": "CANDIDATE_ALREADY_RESOLVED", "message": "Candidate can no longer be edited"})
@@ -508,7 +511,8 @@ def update_candidate(candidate_id: str, payload: CandidateUpdateRequest, user: U
 @app.post("/api/candidates/{candidate_id}/confirm", response_model=CandidateConfirmResponse)
 def confirm_candidate_route(candidate_id: str, payload: CandidateConfirmRequest, idempotency_key: str = Header(alias="Idempotency-Key", min_length=8), user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateConfirmResponse:
     candidate = session.get(CandidateTask, candidate_id)
-    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+    project = session.get(Project, candidate.project_id) if candidate else None
+    if not candidate or not project or not can_contribute_project(session, user, project):
         raise HTTPException(status_code=404, detail="Candidate not found")
     try:
         task, replay = confirm_candidate(session, candidate, user, payload.expected_version, idempotency_key)
@@ -521,7 +525,8 @@ def confirm_candidate_route(candidate_id: str, payload: CandidateConfirmRequest,
 @app.post("/api/candidates/{candidate_id}/ignore", response_model=CandidateRead)
 def ignore_candidate(candidate_id: str, idempotency_key: str = Header(alias="Idempotency-Key", min_length=8), user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateRead:
     candidate = session.get(CandidateTask, candidate_id)
-    if not candidate or candidate.project_id not in readable_project_ids(session, user):
+    project = session.get(Project, candidate.project_id) if candidate else None
+    if not candidate or not project or not can_contribute_project(session, user, project):
         raise HTTPException(status_code=404, detail="Candidate not found")
     existing = session.get(IdempotencyRecord, idempotency_key)
     if existing:

@@ -106,7 +106,7 @@ const apiStatusMap: Record<ApiTask["status"], TaskStatus> = {
 };
 const apiModeMap: Record<ApiTask["execution_mode"], ExecutionMode> = { HUMAN: "human", AI: "ai", HYBRID: "hybrid" };
 const formatApiDate = (value: string | null) => value ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(value)) : "未设置";
-const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, healthReasons:item.health_reasons, progress:item.progress, ownerId:item.owner_id, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
+const projectFromApi = (item: ApiProject, index: number): Project => ({ id:item.id, teamId:item.team_id, name:item.name, client:item.client, stage:item.current_stage, health:item.health, healthReasons:item.health_reasons, progress:item.progress, ownerId:item.owner_id, owner:item.owner_name, nextMilestone:item.next_milestone, due:formatApiDate(item.due_at), color:["#246bfd","#13a86b","#f59e0b"][index % 3], stages:item.stages });
 const taskFromApi = (item: ApiTask): Task => ({ id:item.id, title:item.title, projectId:item.project_id, project:item.project_name, owner:item.owner_name, collaborators:[], reviewer:item.reviewer_name, due:formatApiDate(item.due_at), dueAt:item.due_at, priority:item.priority === "HIGH" ? "高" : item.priority === "LOW" ? "低" : "中", status:apiStatusMap[item.status], apiStatus:item.status, version:item.version, mode:apiModeMap[item.execution_mode], progress:item.progress, description:item.description, deliverable:item.deliverable, acceptance:item.acceptance, source:item.source, nextAction:item.status === "WAITING_REVIEW" ? "等待验收人确认交付物" : item.status === "IN_PROGRESS" ? "继续执行并提交结果" : "按任务状态继续推进" });
 
 type HubContextValue = {
@@ -127,8 +127,6 @@ type HubContextValue = {
   setNotifications: React.Dispatch<React.SetStateAction<HubNotification[]>>;
   contributions: string[];
   setContributions: React.Dispatch<React.SetStateAction<string[]>>;
-  activeTeamId: string;
-  setActiveTeamId: React.Dispatch<React.SetStateAction<string>>;
   teams: TeamWorkspace[];
   notify: (message: string) => void;
   addNotification: (notification: Omit<HubNotification, "id" | "createdAt" | "read">) => void;
@@ -280,7 +278,7 @@ type TeamWorkspace = {
   id: string;
   name: string;
   description: string;
-  role: "CEO" | "成员";
+  role: "CEO" | "成员" | "可查看";
   members: string[];
   projects: string[];
   tone: "blue" | "violet" | "amber";
@@ -290,15 +288,13 @@ type TeamWorkspace = {
 const teamFromApi = (team: ApiTeam, index: number): TeamWorkspace => ({
   id: team.id,
   name: team.name,
-  description: "真实团队协作空间；成员与项目范围由服务端权限控制。",
-  role: team.role === "CEO" ? "CEO" : "成员",
+  description: "真实团队协作空间；所有登录用户均可查看，写操作仍由服务端权限控制。",
+  role: team.role === "CEO" ? "CEO" : team.role === "MEMBER" ? "成员" : "可查看",
   members: team.members.filter((member) => member.is_active).map((member) => member.name),
   memberDetails: team.members,
   projects: team.project_names,
   tone: (["blue", "violet", "amber"] as const)[index % 3],
 });
-
-const emptyTeam: TeamWorkspace = { id:"", name:"尚未加入团队", description:"请通过管理员邀请加入团队。", role:"成员", members:[], projects:[], tone:"blue", memberDetails:[] };
 
 const extractionBatches: Record<ExtractionSource, ExtractionBatch> = {
   meeting: {
@@ -385,10 +381,16 @@ function useHub() {
   return value;
 }
 
-function useActiveTeamMemberProfiles() {
-  const { teams, activeTeamId } = useHub();
-  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
-  return (activeTeam.memberDetails || []).filter((member) => member.is_active);
+function useAllTeamMemberProfiles() {
+  const { teams } = useHub();
+  const profiles = teams.flatMap((team) => team.memberDetails || []).filter((member) => member.is_active);
+  return Array.from(new Map(profiles.map((member) => [member.id, member])).values());
+}
+
+function useProjectTeamMemberProfiles(project?: Project) {
+  const { teams } = useHub();
+  const team = project?.teamId ? teams.find((item) => item.id === project.teamId) : undefined;
+  return (team?.memberDetails || []).filter((member) => member.is_active);
 }
 
 const statusMeta: Record<TaskStatus, { label: string; tone: string }> = {
@@ -583,20 +585,12 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     "解决求助「GEO 问题库结构」 · +5",
     "沉淀知识「等待外部任务处理 SOP」 · +3",
   ] : []);
-  const [activeTeamId, setActiveTeamId] = useState(() => {
-    const savedTeamId = window.localStorage.getItem("quanyi-active-team");
-    return savedTeamId || "";
-  });
   const [toast, setToast] = useState("");
   const [selectedCandidate, setSelectedCandidate] = useState<ApiCandidate | null>(null);
   const [chatPrompt, setChatPrompt] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [flowPreview, setFlowPreview] = useState<FlowPreview | null>(null);
   const refreshProjects = async () => setProjects((await fetchProjects()).map(projectFromApi));
-
-  useEffect(() => {
-    window.localStorage.setItem("quanyi-active-team", activeTeamId);
-  }, [activeTeamId]);
 
   useEffect(() => {
     let active = true;
@@ -609,7 +603,6 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
       const mappedTeams = teamRows.map(teamFromApi);
       setTeams(mappedTeams);
       setCandidates(candidateRows.filter((candidate) => candidate.status === "ACTIVE"));
-      setActiveTeamId((current) => mappedTeams.some((team) => team.id === current) ? current : mappedTeams[0]?.id || "");
     }).catch(() => {
       if (active) setDataError("无法读取服务端项目数据，请确认后端已启动");
     }).finally(() => {
@@ -653,8 +646,6 @@ function WorkHubProvider({ children }: { children: ReactNode }) {
     setNotifications,
     contributions,
     setContributions,
-    activeTeamId,
-    setActiveTeamId,
     teams,
     notify,
     addNotification,
@@ -707,14 +698,13 @@ const resourceNav = [
 ];
 
 function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile: () => void }) {
-  const { activeTeamId, candidates, tasks, teams } = useHub();
+  const { candidates, tasks, teams } = useHub();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const runCount = tasks.filter((task) => task.status === "ai").length;
   const previewIdentity = { name: user.name, role: user.role === "CEO" ? "CEO" : "团队成员" };
-  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   return (
     <>
       {mobileOpen && <button aria-label="关闭导航" className="mobile-scrim" onClick={closeMobile} />}
@@ -775,9 +765,9 @@ function Sidebar({ mobileOpen, closeMobile }: { mobileOpen: boolean; closeMobile
             </span>
             <ChevronRight size={16} />
           </button>
-          <NavLink to="/teams" className="nav-item quiet team-nav-entry" aria-label="我的团队" title="我的团队">
+          <NavLink to="/teams" className="nav-item quiet team-nav-entry" aria-label="团队目录" title="团队目录">
             <Users size={18} />
-            <span><strong>我的团队</strong><small>{activeTeam.name}</small></span>
+            <span><strong>团队目录</strong><small>{teams.length} 个团队</small></span>
             <ChevronRight size={15} />
           </NavLink>
           <button className="nav-item quiet" aria-label="设置" title="设置" onClick={() => navigate("/settings")}>
@@ -873,7 +863,7 @@ function Shell() {
 }
 
 function Dashboard() {
-  const { tasks, candidates, activeTeamId, teams, openTask, openPreview } = useHub();
+  const { tasks, candidates, teams, openTask, openPreview } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -882,7 +872,7 @@ function Dashboard() {
   const requestedExtraction = queryParams.get("extract") as ExtractionSource | null;
   const [extractionOpen, setExtractionOpen] = useState<ExtractionSource | null>(requestedExtraction);
   const [todayOpen, setTodayOpen] = useState(false);
-  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
+  const allTeamMembers = Array.from(new Set(teams.flatMap((team) => team.members)));
   const currentUser = user.name;
   const personalTasks = tasks
     .filter((task) => task.owner === currentUser || task.collaborators.includes(currentUser))
@@ -976,8 +966,8 @@ function Dashboard() {
           action={
             <div className="dashboard-header-actions">
               <button className="dashboard-team-button" onClick={() => navigate("/teams")}>
-                <TeamMemberStack members={activeTeam.members} limit={4} />
-                <span className="dashboard-team-copy"><small>当前团队</small><strong>{activeTeam.name}</strong></span>
+                <TeamMemberStack members={allTeamMembers} limit={4} />
+                <span className="dashboard-team-copy"><small>全局工作范围</small><strong>{teams.length} 个团队</strong></span>
                 <ChevronRight size={16} />
               </button>
             </div>
@@ -1219,33 +1209,43 @@ function ProjectsPage() {
 
 function CreateProject({ onClose, onCreate }: { onClose: () => void; onCreate: (project: Project) => void }) {
   const { user } = useAuth();
-  const { activeTeamId } = useHub();
-  const members = useActiveTeamMemberProfiles();
+  const { teams } = useHub();
+  const administeredTeams = teams.filter((team) => team.role === "CEO");
+  const initialTeamId = administeredTeams[0]?.id || "";
+  const [teamId, setTeamId] = useState(initialTeamId);
+  const selectedTeam = administeredTeams.find((team) => team.id === teamId);
+  const members = (selectedTeam?.memberDetails || []).filter((member) => member.is_active);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ name: "", client: "", ownerId: members.find((member) => member.id === user.id)?.id || members[0]?.id || "", due: "", milestone: "完成项目启动与范围确认" });
+  useEffect(() => {
+    if (members.some((member) => member.id === form.ownerId)) return;
+    setForm((current) => ({...current, ownerId:members.find((member) => member.id === user.id)?.id || members[0]?.id || ""}));
+  }, [teamId]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.name.trim() || !form.client.trim() || !form.ownerId) return;
+    if (!teamId || !form.name.trim() || !form.client.trim() || !form.ownerId) return;
     setBusy(true);setError("");
-    try {const created=await createProject({team_id:activeTeamId||null,name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,owner_id:form.ownerId,next_milestone:form.milestone,due_at:form.due ? new Date(`${form.due}T23:59:59`).toISOString() : null});onCreate(projectFromApi(created,0));}
+    try {const created=await createProject({team_id:teamId,name:form.name.trim(),client:form.client.trim(),objective:`完成 ${form.name.trim()} 的项目目标`,owner_id:form.ownerId,next_milestone:form.milestone,due_at:form.due ? new Date(`${form.due}T23:59:59`).toISOString() : null});onCreate(projectFromApi(created,0));}
     catch(reason){setError(reason instanceof ApiError?reason.message:"项目创建失败");}
     finally{setBusy(false);}
   };
   return <AppModal title="新建项目" subtitle="创建后进入独立项目空间，再逐步补充任务、资产、会议与 AI 上下文。" onClose={onClose} size="lg">
     <form className="form-stack" onSubmit={submit}>
       <label><span>项目名称 *</span><input autoFocus value={form.name} onChange={(event) => setForm({...form,name:event.target.value})} placeholder="例如：客户官网升级"/></label>
-      <div className="form-grid"><label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label><label><span>负责人 *</span><select value={form.ownerId} onChange={(event) => setForm({...form,ownerId:event.target.value})}><option value="">请选择负责人</option>{members.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+      <div className="form-grid"><label><span>所属团队 *</span><select value={teamId} onChange={(event)=>setTeamId(event.target.value)}><option value="">请选择可管理的团队</option>{administeredTeams.map((team)=><option value={team.id} key={team.id}>{team.name}</option>)}</select></label><label><span>负责人 *</span><select value={form.ownerId} onChange={(event) => setForm({...form,ownerId:event.target.value})}><option value="">请选择负责人</option>{members.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+      <label><span>客户 / 组织 *</span><input value={form.client} onChange={(event) => setForm({...form,client:event.target.value})} placeholder="例如：全意内部"/></label>
       <div className="form-grid"><label><span>目标日期</span><input type="date" value={form.due} onChange={(event) => setForm({...form,due:event.target.value})}/></label><label><span>第一个里程碑</span><input value={form.milestone} onChange={(event) => setForm({...form,milestone:event.target.value})}/></label></div>
       <div className="ai-form-tip"><Sparkles size={17}/><span>创建后可进入项目空间补充阶段和任务；所有正式任务仍需人工创建或确认。</span></div>
+      {!administeredTeams.length&&<p className="login-error">你可以查看全部团队和项目，但只有团队管理员可以创建项目。</p>}
       {error&&<p className="login-error">{error}</p>}
-      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!form.name.trim() || !form.client.trim() || !form.ownerId || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
+      <footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!teamId || !form.name.trim() || !form.client.trim() || !form.ownerId || busy}>{busy?"创建中…":"创建并进入项目"}</button></footer>
     </form>
   </AppModal>;
 }
 
 function CreateStageModal({ project, onClose, onSaved }: { project: Project; onClose: () => void; onSaved: (project: Project) => void }) {
-  const members = useActiveTeamMemberProfiles();
+  const members = useProjectTeamMemberProfiles(project);
   const [name, setName] = useState("");
   const [ownerId, setOwnerId] = useState(project.ownerId || members[0]?.id || "");
   const [weight, setWeight] = useState(1);
@@ -1568,7 +1568,7 @@ function ProjectChat({ project }: { project: Project }) {
 function TaskPool() {
   const { tasks, candidates, projects, openTask, openCandidate } = useHub();
   const { user } = useAuth();
-  const memberProfiles = useActiveTeamMemberProfiles();
+  const memberProfiles = useAllTeamMemberProfiles();
   const location = useLocation();
   const navigate = useNavigate();
   const decisionOnly = new URLSearchParams(location.search).get("focus") === "decisions";
@@ -1692,7 +1692,7 @@ function KnowledgeSpace(){return <PreviewOnlyPage title="知识空间" descripti
 function LegacyKnowledgeSpace() {
   const { knowledgePages, setKnowledgePages, assets, setAssets, notify, openPreview, openAsset } = useHub();
   const { user } = useAuth();
-  const teamMemberProfiles = useActiveTeamMemberProfiles();
+  const teamMemberProfiles = useAllTeamMemberProfiles();
   const location = useLocation();
   const requestedPage = new URLSearchParams(location.search).get("page");
   const requestedCreate = new URLSearchParams(location.search).get("create") === "1";
@@ -2492,7 +2492,7 @@ function LegacyAiChat() {
 }
 
 function ChatMemberPanel({ members, onInvite, onClose, title = "会话成员", accessLabel = "可访问本会话", inviteLabel = "邀请团队成员", footerText = "被邀请人可以查看全部历史和后续消息，并使用同一上下文独立向 AI 提问。" }: { members: string[]; onInvite: (name: string) => void; onClose: () => void; title?: string; accessLabel?: string; inviteLabel?: string; footerText?: string }) {
-  const profiles = useActiveTeamMemberProfiles();
+  const profiles = useAllTeamMemberProfiles();
   const invitees = profiles.filter((member) => !members.includes(member.name));
   const roleFor = (name: string) => profiles.find((member) => member.name === name)?.role === "CEO" ? "团队管理员" : "成员";
   return (
@@ -2586,10 +2586,10 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
 
 function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onClose: () => void }) {
   const { projects, setTasks, setCandidates, refreshProjects, notify } = useHub();
-  const teamMembers = useActiveTeamMemberProfiles();
+  const project = projects.find((item) => item.id === candidate.project_id);
+  const teamMembers = useProjectTeamMemberProfiles(project);
   const [form, setForm] = useState({ title:candidate.title, ownerId:candidate.owner_id || "", reviewerId:candidate.reviewer_id || "", due:candidate.due_at ? candidate.due_at.slice(0,16) : "", deliverable:candidate.deliverable, description:candidate.description });
   const [busy, setBusy] = useState(false);
-  const project = projects.find((item) => item.id === candidate.project_id);
   const create = async () => {
     if (!form.title.trim() || !form.deliverable.trim() || !form.ownerId || !form.reviewerId) return;
     setBusy(true);
@@ -2880,7 +2880,7 @@ function LegacyTaskExtractionReview({ initialSource, onClose }: { initialSource:
 function MyAssignedTasksReview({ initialSource, onClose }: { initialSource: ExtractionSource | null; onClose: () => void }) {
   const { setTasks, notify, addNotification, projects } = useHub();
   const { user } = useAuth();
-  const teamMembers = useActiveTeamMemberProfiles().map((member) => member.name);
+  const teamMembers = useAllTeamMemberProfiles().map((member) => member.name);
   const [filter, setFilter] = useState<"all" | ExtractionSource>(initialSource || "all");
   const assignedItems = (["meeting", "chat"] as const).flatMap((source) => {
     const batch = visibleExtractionBatches[source];
@@ -3086,52 +3086,47 @@ function TeamInvitationPanel({teamId,refreshKey}:{teamId:string;refreshKey:numbe
 }
 
 function TeamsPage() {
-  const { activeTeamId, setActiveTeamId, teams, notify, openPreview } = useHub();
-  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
-  const [inviteOpen,setInviteOpen] = useState(false);
+  const { teams, openPreview } = useHub();
+  const [inviteTeam,setInviteTeam] = useState<TeamWorkspace|null>(null);
   const [invitationRefresh,setInvitationRefresh] = useState(0);
+  const allMembers = Array.from(new Set(teams.flatMap((team) => team.members)));
+  const managedTeams = teams.filter((team) => team.role === "CEO");
+  const totalProjects = teams.reduce((total, team) => total + team.projects.length, 0);
   const showMembers = (team: TeamWorkspace) => openPreview({
     eyebrow: "团队成员",
     title: team.name,
     description: `${team.members.length} 位成员共同参与这个团队的项目、任务、知识和 AI 工作。`,
     items: (team.memberDetails||[]).map((member) => ({title:member.name,detail:`${member.role === "CEO" ? "团队管理员" : "团队成员"} · ${member.email}${member.is_active ? "" : " · 已停用"}`})),
-    note: "成员数据来自服务端；具体项目和资产仍按各自权限控制。",
+    note: "成员数据来自服务端；所有登录用户均可查看团队、项目和任务，写操作仍按职责校验。",
     primaryLabel: "关闭成员列表",
   });
-  const switchTeam = (team: TeamWorkspace) => {
-    setActiveTeamId(team.id);
-    notify(`当前工作团队已切换为「${team.name}」`);
-  };
   return <div className="teams-page">
-    <PageHeader title="我的团队" description="查看真实团队成员，并切换当前工作的组织范围。" action={activeTeam.role === "CEO" && activeTeam.id ? <button className="button primary" onClick={()=>setInviteOpen(true)}><UserPlus size={16}/> 邀请成员</button> : undefined} />
+    <PageHeader title="团队目录" description="所有登录成员共用一个全局工作范围，可查看全部团队、项目和任务。" />
     <div className="teams-page-grid">
       <section className="panel team-list-panel">
-        <header><div><span className="section-kicker">TEAM WORKSPACES</span><h2>我加入的团队</h2><p>团队和成员关系均从服务端读取。</p></div><span className="team-total">{teams.length} 个团队</span></header>
+        <header><div><span className="section-kicker">TEAM DIRECTORY</span><h2>全部团队</h2><p>团队和成员关系均从服务端读取，不再需要切换团队。</p></div><span className="team-total">{teams.length} 个团队</span></header>
         <div className="team-workspace-list">
-          {teams.map((team) => {
-            const isActive = team.id === activeTeam.id;
-            return <article className={`team-workspace-card ${team.tone}${isActive ? " active" : ""}`} key={team.id}>
+          {teams.map((team) => <article className={`team-workspace-card ${team.tone}`} key={team.id}>
               <span className="team-workspace-mark">{team.name.slice(0, 1)}</span>
-              <div className="team-workspace-copy"><div><h3>{team.name}</h3>{isActive && <span className="current-team-pill"><Check size={12}/> 当前团队</span>}</div><p>{team.description}</p><small>{team.projects.length} 个活跃项目 · 我的角色：{team.role}</small></div>
+              <div className="team-workspace-copy"><div><h3>{team.name}</h3><span className="current-team-pill">{team.role}</span></div><p>{team.description}</p><small>{team.projects.length} 个项目 · {team.members.length} 位有效成员</small></div>
               <div className="team-workspace-members"><TeamMemberStack members={team.members}/><button className="text-button" onClick={() => showMembers(team)}>查看成员</button></div>
-              <button className={isActive ? "button secondary compact current" : "button secondary compact"} disabled={isActive} onClick={() => switchTeam(team)}>{isActive ? "正在使用" : "切换到此团队"}{!isActive && <ArrowRight size={14}/>}</button>
-            </article>;
-          })}
+              {team.role === "CEO" ? <button className="button secondary compact" onClick={() => setInviteTeam(team)}><UserPlus size={14}/> 邀请成员</button> : <span className="button secondary compact current">全局可见</span>}
+            </article>)}
         </div>
       </section>
       <aside className="team-context-column">
         <section className="panel current-team-card">
-          <div className={`current-team-logo ${activeTeam.tone}`}>{activeTeam.name.slice(0, 1)}</div>
-          <span className="section-kicker">当前工作范围</span>
-          <h2>{activeTeam.name}</h2>
-          <p>{activeTeam.description}</p>
-          <div className="current-team-meta"><span><Users size={15}/>{activeTeam.members.length} 位成员</span><span><FolderKanban size={15}/>{activeTeam.projects.length} 个项目</span></div>
-          <div className="team-member-board"><div><strong>团队成员</strong><button className="text-button" onClick={() => showMembers(activeTeam)}>查看全部</button></div><TeamMemberStack members={activeTeam.members} limit={6}/><p>{activeTeam.members.slice(0, 4).join("、")}{activeTeam.members.length > 4 ? `等 ${activeTeam.members.length} 人` : ""}</p></div>
+          <div className="current-team-logo blue">全</div>
+          <span className="section-kicker">全局工作范围</span>
+          <h2>全部团队</h2>
+          <p>无需切换，项目空间、任务池和搜索统一读取所有团队的真实数据。</p>
+          <div className="current-team-meta"><span><Users size={15}/>{allMembers.length} 位成员</span><span><FolderKanban size={15}/>{totalProjects} 个项目</span></div>
+          <div className="team-member-board"><div><strong>全部成员</strong></div><TeamMemberStack members={allMembers} limit={6}/><p>{allMembers.slice(0, 4).join("、")}{allMembers.length > 4 ? `等 ${allMembers.length} 人` : ""}</p></div>
         </section>
-        {activeTeam.role === "CEO" && activeTeam.id && <TeamInvitationPanel teamId={activeTeam.id} refreshKey={invitationRefresh}/>}
-        <section className="panel team-scope-note"><h3>切换团队会发生什么？</h3><p>工作台、项目空间和任务会优先显示当前团队内容；个人跨团队 AI 检索尚未开放。</p><button className="text-button" onClick={() => openPreview({eyebrow:"团队与权限",title:"团队范围如何生效",description:"团队负责组织成员和工作范围，项目负责承载具体目标与交付。",items:[{title:"当前团队",detail:"决定工作台默认呈现的真实项目与任务"},{title:"跨团队 AI",detail:"当前未开放，不会读取其他团队内容"},{title:"项目权限",detail:"加入团队后仍需按项目授予编辑或查看权限"}],note:"切换团队不会退出其他团队，也不会改变已有权限。",primaryLabel:"我知道了"})}>了解团队与权限 <ArrowRight size={14}/></button></section>
+        {managedTeams.length === 1 && <TeamInvitationPanel teamId={managedTeams[0].id} refreshKey={invitationRefresh}/>}
+        <section className="panel team-scope-note"><h3>全局可见不等于全局可改</h3><p>所有有效账号都能查看全部团队、项目和任务；邀请成员、管理项目、提交结果和验收仍按管理员、负责人及验收人权限执行。</p></section>
       </aside>
-      {inviteOpen&&<InviteTeamMember team={activeTeam} onClose={()=>setInviteOpen(false)} onCreated={()=>setInvitationRefresh(value=>value+1)}/>}
+      {inviteTeam&&<InviteTeamMember team={inviteTeam} onClose={()=>setInviteTeam(null)} onCreated={()=>setInvitationRefresh(value=>value+1)}/>}
     </div>
   </div>;
 }
@@ -3157,10 +3152,9 @@ function PasswordSecurityCard() {
 }
 
 function SettingsPage() {
-  const { activeTeamId, teams } = useHub();
+  const { teams } = useHub();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const activeTeam = teams.find((team) => team.id === activeTeamId) || teams[0] || emptyTeam;
   const [tab, setTab] = useState("个人设置");
   const settings = {task:true,mention:true,ai:true,weekly:false,confirm:true,assets:true};
   return <>
@@ -3168,7 +3162,7 @@ function SettingsPage() {
     <div className="settings-layout">
       <aside className="panel settings-nav">{["个人设置","通知规则","AI 与权限"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}<ChevronRight size={15}/></button>)}</aside>
       <section className="panel settings-main">
-        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 当前团队：{activeTeam.name}</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期（暂未开放）</span><select disabled><option>本周</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看已加入的团队、切换当前团队或邀请真实成员，请进入“我的团队”。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看我的团队 <ArrowRight size={14}/></button></div></>}
+        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 可查看全部 {teams.length} 个团队</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期（暂未开放）</span><select disabled><option>本周</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看全部团队和成员，或管理你有管理员权限的团队邀请。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看团队目录 <ArrowRight size={14}/></button></div></>}
         {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则 · 只读预览</h2><p>保存偏好接口尚未实现，开关已禁用。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
         {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限 · 只读预览</h2><p>权限策略由服务端固定执行，个性化设置尚未开放。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","项目 AI 当前只读取真实项目任务"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>项目 AI 的读取权限不会超过当前成员，关键写入进入人工确认。</span></div></>}
       </section>
