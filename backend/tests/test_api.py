@@ -431,6 +431,14 @@ def test_wecom_status_requires_login_and_never_exposes_access_token() -> None:
         assert "access_token" not in response.json()
         assert "access-token" not in response.text.lower()
 
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        forbidden = client.post(
+            "/api/integrations/wecom/documents",
+            headers={"Authorization": f"Bearer {member_login['access_token']}"},
+            json={"doc_name": "越权文档", "doc_type": 10},
+        )
+        assert forbidden.status_code == 403
+
 
 def test_non_admin_cannot_invite_team_member() -> None:
     with TestClient(app) as client:

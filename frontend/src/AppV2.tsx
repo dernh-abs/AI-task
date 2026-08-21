@@ -1689,6 +1689,7 @@ function LegacyHelpCenter() {
 
 function KnowledgeSpace(){
   const { notify } = useHub();
+  const { user } = useAuth();
   const [status,setStatus] = useState<ApiWeComStatus|null>(null);
   const [loading,setLoading] = useState(true);
   const [busy,setBusy] = useState(false);
@@ -1721,9 +1722,10 @@ function KnowledgeSpace(){
           <label><span>文档名称</span><input value={docName} onChange={event=>setDocName(event.target.value)} placeholder="例如：项目周报"/></label>
           <div className="form-grid"><label><span>文档类型</span><select value={docType} onChange={event=>setDocType(Number(event.target.value) as 3|4|10)}><option value={10}>智能表格</option><option value={3}>文档</option><option value={4}>表格</option></select></label><label><span>空间 ID（可选）</span><input value={spaceId} onChange={event=>setSpaceId(event.target.value)} placeholder="spaceid"/></label></div>
           <label><span>文档管理员 UserID（可选，逗号分隔）</span><input value={adminUsers} onChange={event=>setAdminUsers(event.target.value)} placeholder="zhangsan,lisi"/></label>
+          {user.role!=="CEO"&&<div className="permission-note"><ShieldCheck size={17}/><span>仅团队管理员可以创建外部文档；你仍可查看企业微信连接状态。</span></div>}
           {error&&<p className="login-error">{error}</p>}
           {created&&<div className="wecom-created-result"><CheckCircle2 size={18}/><span><strong>创建成功</strong><small>文档 ID：{created.docid}</small></span>{created.doc_url&&<a href={created.doc_url} target="_blank" rel="noreferrer">打开文档 <ArrowRight size={14}/></a>}</div>}
-          <button className="button primary" disabled={busy||!docName.trim()||!status?.connected}><FilePlus2 size={16}/>{busy?"正在创建…":"创建文档"}</button>
+          <button className="button primary" disabled={busy||!docName.trim()||!status?.connected||user.role!=="CEO"}><FilePlus2 size={16}/>{busy?"正在创建…":"创建文档"}</button>
         </form>
       </section>
     </div>

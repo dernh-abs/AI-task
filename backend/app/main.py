@@ -135,7 +135,9 @@ def wecom_status(_: User = Depends(get_current_user)) -> WeComStatusRead:
 
 
 @app.post("/api/integrations/wecom/documents", response_model=WeComDocumentRead)
-def create_wecom_document(payload: WeComDocumentCreateRequest, _: User = Depends(get_current_user)) -> WeComDocumentRead:
+def create_wecom_document(payload: WeComDocumentCreateRequest, user: User = Depends(get_current_user)) -> WeComDocumentRead:
+    if user.role != TeamRole.CEO:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅团队管理员可以创建企业微信文档")
     try:
         result = WeComDocumentsClient(settings).create_document(
             doc_name=payload.doc_name,
