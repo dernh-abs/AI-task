@@ -68,13 +68,19 @@ def test_protected_endpoint_requires_login() -> None:
         assert client.get("/api/projects").status_code == 401
 
 
-def test_non_project_member_cannot_see_project_data() -> None:
+def test_team_member_can_read_all_team_projects_without_project_membership() -> None:
     with TestClient(app) as client:
         login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"})
         token = login.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
-        assert client.get("/api/projects", headers=headers).json() == []
-        assert client.get("/api/tasks", headers=headers).json() == []
+        projects = client.get("/api/projects", headers=headers)
+        tasks = client.get("/api/tasks", headers=headers)
+        assert projects.status_code == 200
+        assert any(item["id"] == "p-quanyi" for item in projects.json())
+        assert tasks.status_code == 200
+        assert any(item["project_id"] == "p-quanyi" for item in tasks.json())
+        assert client.patch("/api/projects/p-quanyi", headers=headers, json={"name": "不允许普通成员改名"}).status_code == 403
+        assert client.post("/api/projects/p-quanyi/stages", headers=headers, json={"name": "不允许普通成员创建阶段", "owner_id": "u-observer"}).status_code == 403
 
 
 def test_manual_task_submission_review_and_idempotency() -> None:
@@ -253,8 +259,10 @@ def test_global_agent_run_list_uses_real_records_and_permissions() -> None:
 
         observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
         observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
-        assert client.get("/api/agent-runs", headers=observer_headers).json() == []
-        assert client.get("/api/agent-runs?project_id=p-quanyi", headers=observer_headers).status_code == 403
+        observer_runs = client.get("/api/agent-runs", headers=observer_headers)
+        assert observer_runs.status_code == 200
+        assert any(item["id"] == run_id for item in observer_runs.json())
+        assert client.get("/api/agent-runs?project_id=p-quanyi", headers=observer_headers).status_code == 200
 
 
 def test_project_chat_is_persistent_grounded_and_idempotent() -> None:
@@ -285,8 +293,8 @@ def test_project_chat_is_persistent_grounded_and_idempotent() -> None:
 
         observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
         observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
-        assert client.get(f"/api/project-conversations/{conversation_id}/messages", headers=observer_headers).status_code == 403
-        assert client.post("/api/projects/p-quanyi/conversations", headers=observer_headers, json={"title": "越权对话"}).status_code == 403
+        assert client.get(f"/api/project-conversations/{conversation_id}/messages", headers=observer_headers).status_code == 200
+        assert client.post("/api/projects/p-quanyi/conversations", headers=observer_headers, json={"title": "团队协作对话"}).status_code == 200
 
 
 def test_project_stage_task_crud_and_weighted_aggregation() -> None:
