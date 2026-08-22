@@ -1257,14 +1257,20 @@ function CreateStageModal({ project, onClose, onSaved }: { project: Project; onC
 
 function ProjectSpace() {
   const { projectId = "" } = useParams();
-  const { projects, setProjects, tasks, assets, openTask, openAsset, openPreview, notify } = useHub();
+  const { projects, setProjects, tasks, assets, teams, openTask, openAsset, openPreview, notify } = useHub();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const project = projects.find((item) => item.id === projectId);
   const [tab, setTab] = useState(() => new URLSearchParams(location.search).get("tab") === "ai" ? "AI 协作" : "总览");
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [createStageOpen, setCreateStageOpen] = useState(false);
+  const [inviteProjectOpen, setInviteProjectOpen] = useState(false);
+  const [projectMembers, setProjectMembers] = useState<ApiProjectMember[]>([]);
+  useEffect(()=>{let active=true;if(projectId)fetchProjectMembers(projectId).then((rows)=>{if(active)setProjectMembers(rows);}).catch(()=>{if(active)setProjectMembers([]);});return()=>{active=false;};},[projectId]);
   if (!project) return <Navigate to="/projects" replace />;
+  const projectTeam = teams.find((team)=>team.id===project.teamId);
+  const canInviteProject = project.ownerId===user.id || projectMembers.some((member)=>member.id===user.id);
   const projectTasks = tasks.filter((task) => task.projectId === project.id);
   const projectAssets = assets.filter((asset) => asset.scope.includes(project.client) || project.id === "p-quanyi");
   const tabs = ["总览", "任务", "AI 协作", "资产", "会议"];
@@ -1284,6 +1290,7 @@ function ProjectSpace() {
         <div className="project-hero-actions">
           <span className={"health-pill " + project.health}>{project.health}</span>
           <button className="button secondary" onClick={() => setTab("AI 协作")}><Sparkles size={16} /> AI 协作</button>
+          {canInviteProject&&projectTeam&&<button className="button secondary" onClick={()=>setInviteProjectOpen(true)}><UserPlus size={16}/> 邀请项目成员</button>}
           <button className="button primary" onClick={() => setCreateTaskOpen(true)}><Plus size={16} /> 添加任务</button>
         </div>
       </section>
@@ -1334,7 +1341,7 @@ function ProjectSpace() {
       )}
 
       {tab === "任务" && <ProjectBoard tasks={projectTasks} />}
-      {tab === "AI 协作" && <ProjectChat project={project} />}
+      {tab === "AI 协作" && <ProjectChat project={project} canInvite={canInviteProject&&!!projectTeam} onInvite={()=>setInviteProjectOpen(true)} />}
       {tab === "资产" && (
         <section className="panel tab-panel">
           <div className="panel-title-row"><div><h2>项目资产</h2><p>资产服务尚未接入，当前不会展示或创建本地演示数据。</p></div><button className="button primary" disabled title="项目资产写入尚未接入服务端"><FilePlus2 size={16}/> 暂未开放</button></div>
@@ -1349,6 +1356,7 @@ function ProjectSpace() {
       )}
       {createTaskOpen && <CreateTask onClose={() => setCreateTaskOpen(false)} defaultProjectId={project.id} />}
       {createStageOpen && <CreateStageModal project={project} onClose={()=>setCreateStageOpen(false)} onSaved={(saved)=>{setProjects((items)=>items.map((item)=>item.id===saved.id?saved:item));setCreateStageOpen(false);notify("阶段已创建");}}/>}
+      {inviteProjectOpen&&projectTeam&&<InviteTeamMember team={projectTeam} project={project} onClose={()=>setInviteProjectOpen(false)} onCreated={()=>{}}/>}
     </div>
   );
 }
@@ -1516,9 +1524,8 @@ function LegacyProjectBoard({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function ProjectChat({ project }: { project: Project }) {
+function ProjectChat({ project, canInvite, onInvite }: { project: Project; canInvite:boolean; onInvite:()=>void }) {
   const { tasks, setCandidates, notify, openCandidate } = useHub();
-  const navigate = useNavigate();
   const [conversations, setConversations] = useState<ApiProjectConversation[]>([]);
   const [activeId, setActiveId] = useState("");
   const [messages, setMessages] = useState<ApiProjectChatMessage[]>([]);
@@ -1557,7 +1564,7 @@ function ProjectChat({ project }: { project: Project }) {
   };
   return <div className="project-chat-layout">
     <aside className="chat-sessions panel"><div className="panel-title-row"><h2>项目对话</h2><button className="icon-button" disabled={busy} onClick={startSession} aria-label="新建项目对话"><Plus size={16}/></button></div>{conversations.map((item)=><button className={activeId===item.id?"active":""} key={item.id} onClick={()=>void openConversation(item.id)}><MessageSquareText size={15}/><span><strong>{item.title}</strong><small>{item.message_count} 条消息 · {item.created_by_name}</small></span></button>)}{!conversations.length&&!loading&&<p className="preview-boundary-note">还没有项目对话，点击右上角新建。</p>}</aside>
-    <section className="project-chat-main panel"><header><AssistantLifeOrb size="small"/><div><strong>{project.name} · 项目 AI 协作</strong><small>真实持久化 · 当前只连接 {projectTasks.length} 个项目任务</small></div><div className="project-chat-header-actions"><div className="avatar-stack compact">{members.slice(0,3).map((member)=><Avatar name={member.name} size="sm" key={member.id}/>)}</div><button className="button secondary compact" onClick={()=>navigate("/teams")}><Users size={15}/> 管理项目访问</button></div></header>
+    <section className="project-chat-main panel"><header><AssistantLifeOrb size="small"/><div><strong>{project.name} · 项目 AI 协作</strong><small>真实持久化 · 当前只连接 {projectTasks.length} 个项目任务</small></div><div className="project-chat-header-actions"><div className="avatar-stack compact">{members.slice(0,3).map((member)=><Avatar name={member.name} size="sm" key={member.id}/>)}</div>{canInvite&&<button className="button secondary compact" onClick={onInvite}><UserPlus size={15}/> 邀请项目成员</button>}</div></header>
       <div className="chat-messages"><div className="project-scope-note"><FolderKanban size={15}/><span><strong>项目边界已锁定</strong>服务端只读取「{project.name}」中当前用户有权查看的任务；会议和资产尚未接入，不会被宣称为上下文。</span></div>{loading&&<div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking"/><div className="ai-thinking-copy"><strong>正在读取真实历史</strong><small>从服务端加载项目会话…</small></div></div>}{!loading&&messages.map((message)=><div className={"chat-message "+(message.role==="ASSISTANT"?"ai":"user")} key={message.id}>{message.role==="ASSISTANT"&&<AssistantLifeOrb size="tiny" state="active"/>}<div><p>{message.content}</p>{message.role==="ASSISTANT"&&<small className="chat-grounding-meta"><strong>{message.execution_mode}</strong> · 引用了 {message.context_task_titles.length} 个真实任务 · Prompt {message.prompt_version}</small>}{message.role==="ASSISTANT"&&<button className="button secondary compact" disabled={busy} onClick={()=>void extractCandidate(message)}><Sparkles size={14}/> 从回答提取候选</button>}</div></div>)}{!loading&&!messages.length&&<EmptyState icon={<MessageSquareText/>} title="开始一段真实项目对话" description="消息会保存到服务端，并且只读取当前项目的真实任务。"/>}{busy&&<div className="chat-message ai is-thinking"><AssistantLifeOrb size="tiny" state="thinking"/><div className="ai-thinking-copy"><strong>正在处理</strong><small>生成结果前不会显示成功状态…</small></div></div>}{error&&<p className="login-error">{error}</p>}</div>
       <form className="chat-composer" onSubmit={(event)=>{event.preventDefault();void send();}}><input value={text} onChange={(event)=>setText(event.target.value)} placeholder="基于当前项目真实任务提问…"/><button className="send-button" aria-label="发送" disabled={!text.trim()||busy}><Send size={16}/></button></form>
     </section>
@@ -3080,7 +3087,7 @@ function TeamMemberStack({ members, limit = 5 }: { members: string[]; limit?: nu
   return <span className="team-avatar-stack" aria-label={`${members.length} 位成员`}>{visible.map((name) => <Avatar key={name} name={name} size="sm"/>)}{remaining > 0 && <i>+{remaining}</i>}</span>;
 }
 
-function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:()=>void;onCreated:()=>void}) {
+function InviteTeamMember({team,project,onClose,onCreated}:{team:TeamWorkspace;project?:Project;onClose:()=>void;onCreated:()=>void}) {
   const { notify } = useHub();
   const [email,setEmail] = useState("");
   const [role,setRole] = useState<"MEMBER"|"CEO">("MEMBER");
@@ -3091,7 +3098,7 @@ function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:(
   const submit = async(event:FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const result = await createTeamInvitation(team.id,{email:email.trim(),role,project_id:null,project_role:null});
+      const result = await createTeamInvitation(team.id,{email:email.trim(),role:team.role==="CEO"?role:"MEMBER",project_id:project?.id||null,project_role:project?"MEMBER":null});
       const url = new URL(import.meta.env.BASE_URL || "/",window.location.origin);
       url.searchParams.set("invite",result.activation_token);
       setActivationLink(url.toString());
@@ -3102,8 +3109,9 @@ function InviteTeamMember({team,onClose,onCreated}:{team:TeamWorkspace;onClose:(
     finally { setBusy(false); }
   };
   const copy = async() => { await navigator.clipboard.writeText(activationLink); notify("邀请链接已复制"); };
-  return <AppModal title={`邀请成员加入「${team.name}」`} subtitle="邀请链接只能使用一次；对方激活后才会成为真实团队成员。" onClose={onClose}>
-    {!activationLink?<form className="form-stack" onSubmit={submit}><label><span>受邀邮箱</span><input autoFocus type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="name@company.com"/></label><label><span>团队角色</span><select value={role} onChange={(event)=>setRole(event.target.value as "MEMBER"|"CEO")}><option value="MEMBER">团队成员</option><option value="CEO">团队管理员</option></select></label>{error&&<p className="login-error">{error}</p>}<div className="permission-note"><ShieldCheck size={17}/><span>系统会尝试发送一次性注册邮件；若邮件服务异常，邀请仍会创建并提供复制链接兜底。</span></div><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy||!email.includes("@")}><UserPlus size={16}/>{busy?"正在发送…":"发送注册邀请"}</button></footer></form>:<div className="form-stack"><div className={`permission-note${delivery==="SENT"?" success":" warning"}`}>{delivery==="SENT"?<CheckCircle2 size={17}/>:<AlertCircle size={17}/>}<span>{delivery==="SENT"?`邀请邮件已发送至 ${email}。对方使用后链接立即失效。`:delivery==="FAILED"?"邀请已创建，但邮件发送失败。请复制链接并通过可信渠道发送。":"邀请已创建，但邮件服务尚未配置。请复制链接发送给对方。"}</span></div><label><span>一次性激活链接</span><textarea readOnly value={activationLink}/></label><footer className="modal-actions"><button className="button secondary" onClick={onClose}>完成</button><button className="button primary" onClick={copy}>复制邀请链接</button></footer></div>}
+  const targetName=project?`项目「${project.name}」`:`团队「${team.name}」`;
+  return <AppModal title={`邀请成员加入${targetName}`} subtitle="邀请链接只能使用一次；已有账号登录后接受，未注册邮箱仅可由管理员邀请开户。" onClose={onClose}>
+    {!activationLink?<form className="form-stack" onSubmit={submit}><label><span>受邀邮箱</span><input autoFocus type="email" value={email} onChange={(event)=>setEmail(event.target.value)} placeholder="name@company.com"/></label>{!project&&team.role==="CEO"&&<label><span>团队角色</span><select value={role} onChange={(event)=>setRole(event.target.value as "MEMBER"|"CEO")}><option value="MEMBER">团队成员</option><option value="CEO">团队管理员</option></select></label>}{error&&<p className="login-error">{error}</p>}<div className="permission-note"><ShieldCheck size={17}/><span>{team.role==="CEO"?"管理员可邀请已有账号，也可向未注册邮箱发送开户邀请。":"你可以邀请已注册账号加入当前范围；未注册邮箱的开户邀请仍需由团队管理员发出。"}</span></div><footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy||!email.includes("@")}><UserPlus size={16}/>{busy?"正在发送…":"发送邀请"}</button></footer></form>:<div className="form-stack"><div className={`permission-note${delivery==="SENT"?" success":" warning"}`}>{delivery==="SENT"?<CheckCircle2 size={17}/>:<AlertCircle size={17}/>}<span>{delivery==="SENT"?`邀请邮件已发送至 ${email}。对方使用后链接立即失效。`:delivery==="FAILED"?"邀请已创建，但邮件发送失败。请复制链接并通过可信渠道发送。":"邀请已创建，但邮件服务尚未配置。请复制链接发送给对方。"}</span></div><label><span>一次性激活链接</span><textarea readOnly value={activationLink}/></label><footer className="modal-actions"><button className="button secondary" onClick={onClose}>完成</button><button className="button primary" onClick={copy}>复制邀请链接</button></footer></div>}
   </AppModal>;
 }
 
@@ -3135,7 +3143,7 @@ function TeamsPage() {
   const [inviteTeam,setInviteTeam] = useState<TeamWorkspace|null>(null);
   const [invitationRefresh,setInvitationRefresh] = useState(0);
   const allMembers = Array.from(new Set(teams.flatMap((team) => team.members)));
-  const managedTeams = teams.filter((team) => team.role === "CEO");
+  const joinedTeams = teams.filter((team) => team.role !== "可查看");
   const totalProjects = teams.reduce((total, team) => total + team.projects.length, 0);
   const showMembers = (team: TeamWorkspace) => openPreview({
     eyebrow: "团队成员",
@@ -3155,7 +3163,7 @@ function TeamsPage() {
               <span className="team-workspace-mark">{team.name.slice(0, 1)}</span>
               <div className="team-workspace-copy"><div><h3>{team.name}</h3><span className="current-team-pill">{team.role}</span></div><p>{team.description}</p><small>{team.projects.length} 个项目 · {team.members.length} 位有效成员</small></div>
               <div className="team-workspace-members"><TeamMemberStack members={team.members}/><button className="text-button" onClick={() => showMembers(team)}>查看成员</button></div>
-              {team.role === "CEO" ? <button className="button secondary compact" onClick={() => setInviteTeam(team)}><UserPlus size={14}/> 邀请成员</button> : <span className="button secondary compact current">全局可见</span>}
+              {team.role !== "可查看" ? <button className="button secondary compact" onClick={() => setInviteTeam(team)}><UserPlus size={14}/> 邀请成员</button> : <span className="button secondary compact current">全局可见</span>}
             </article>)}
         </div>
       </section>
@@ -3168,8 +3176,8 @@ function TeamsPage() {
           <div className="current-team-meta"><span><Users size={15}/>{allMembers.length} 位成员</span><span><FolderKanban size={15}/>{totalProjects} 个项目</span></div>
           <div className="team-member-board"><div><strong>全部成员</strong></div><TeamMemberStack members={allMembers} limit={6}/><p>{allMembers.slice(0, 4).join("、")}{allMembers.length > 4 ? `等 ${allMembers.length} 人` : ""}</p></div>
         </section>
-        {managedTeams.length === 1 && <TeamInvitationPanel teamId={managedTeams[0].id} refreshKey={invitationRefresh}/>}
-        <section className="panel team-scope-note"><h3>全局可见不等于全局可改</h3><p>所有有效账号都能查看全部团队、项目和任务；邀请成员、管理项目、提交结果和验收仍按管理员、负责人及验收人权限执行。</p></section>
+        {joinedTeams.length === 1 && <TeamInvitationPanel teamId={joinedTeams[0].id} refreshKey={invitationRefresh}/>}
+        <section className="panel team-scope-note"><h3>全局可见不等于全局可改</h3><p>所有有效账号都能查看全部团队、项目和任务；团队成员可邀请已有账号加入本团队，项目成员可邀请已有账号加入本项目，注册新账号仍仅限管理员。</p></section>
       </aside>
       {inviteTeam&&<InviteTeamMember team={inviteTeam} onClose={()=>setInviteTeam(null)} onCreated={()=>setInvitationRefresh(value=>value+1)}/>}
     </div>
@@ -3207,7 +3215,7 @@ function SettingsPage() {
     <div className="settings-layout">
       <aside className="panel settings-nav">{["个人设置","通知规则","AI 与权限"].map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}<ChevronRight size={15}/></button>)}</aside>
       <section className="panel settings-main">
-        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 可查看全部 {teams.length} 个团队</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期（暂未开放）</span><select disabled><option>本周</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看全部团队和成员，或管理你有管理员权限的团队邀请。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看团队目录 <ArrowRight size={14}/></button></div></>}
+        {tab === "个人设置" && <><div className="settings-profile"><Avatar name={user.name} size="lg"/><div><h2>{user.name}</h2><p>{user.role === "CEO" ? "团队管理员" : "团队成员"} · 可查看全部 {teams.length} 个团队</p></div></div><div className="settings-form"><label><span>显示名称</span><input value={user.name} readOnly/></label><label><span>登录邮箱</span><input value={user.email} readOnly/></label><label><span>默认工作周期（暂未开放）</span><select disabled><option>本周</option></select></label></div><PasswordSecurityCard/><div className="settings-team-redirect"><Users size={19}/><div><strong>团队成员由服务端管理</strong><p>查看全部团队和成员，或管理你在所属团队中发出的邀请。</p></div><button className="button secondary compact" onClick={() => navigate("/teams")}>查看团队目录 <ArrowRight size={14}/></button></div></>}
         {tab === "通知规则" && <><div className="panel-title-row"><div><h2>通知规则 · 只读预览</h2><p>保存偏好接口尚未实现，开关已禁用。</p></div></div><div className="settings-switch-list">{[["task","任务状态变化","任务被分配、截止或状态变化时通知"],["mention","@提及","任务、知识页面或空间动态中提到你时通知"],["ai","AI 结果待确认","AI 执行结束并等待人工判断时通知"],["weekly","每周摘要","每周一推送上周完成与本周重点"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div></>}
         {tab === "AI 与权限" && <><div className="panel-title-row"><div><h2>AI 与权限 · 只读预览</h2><p>权限策略由服务端固定执行，个性化设置尚未开放。</p></div></div><div className="settings-switch-list">{[["confirm","关键结果必须人工确认","创建正式任务、完成验收和发布资产前等待确认"],["assets","允许读取已授权资产","项目 AI 当前只读取真实项目任务"]].map(([key,title,desc]) => <button key={key} disabled><p><strong>{title}</strong><small>{desc}</small></p><i className={settings[key as keyof typeof settings] ? "on" : ""}><span/></i></button>)}</div><div className="permission-note"><CheckCircle2 size={17}/><span>项目 AI 的读取权限不会超过当前成员，关键写入进入人工确认。</span></div></>}
       </section>

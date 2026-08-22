@@ -483,12 +483,75 @@ def test_wecom_status_requires_login_and_never_exposes_access_token() -> None:
         assert forbidden.status_code == 403
 
 
-def test_non_admin_cannot_invite_team_member() -> None:
+def test_non_admin_cannot_invite_unregistered_account() -> None:
     with TestClient(app) as client:
         login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
         headers = {"Authorization": f"Bearer {login['access_token']}"}
         response = client.post("/api/teams/team-quanyi/invitations", headers=headers, json={"email": "blocked@quanyi.local"})
         assert response.status_code == 403
+
+
+def test_team_member_can_invite_existing_account_and_manage_own_invitation() -> None:
+    with Session(engine) as session:
+        session.add(User(
+            id="u-existing-outsider",
+            email="existing.outsider@quanyi.local",
+            password_hash=hash_password("existing-outsider-2026"),
+            name="已有外部账号",
+            role=TeamRole.MEMBER,
+        ))
+        session.commit()
+
+    with TestClient(app) as client:
+        login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=headers,
+            json={"email": "existing.outsider@quanyi.local", "role": "MEMBER"},
+        )
+        assert created.status_code == 200
+        assert client.get(f"/api/invitations/{created.json()['activation_token']}").json()["account_exists"] is True
+
+        elevated = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=headers,
+            json={"email": "existing.outsider@quanyi.local", "role": "CEO"},
+        )
+        assert elevated.status_code == 403
+
+        listed = client.get("/api/teams/team-quanyi/invitations", headers=headers)
+        assert listed.status_code == 200
+        assert [item["id"] for item in listed.json()] == [created.json()["id"]]
+        revoked = client.post(f"/api/teams/team-quanyi/invitations/{created.json()['id']}/revoke", headers=headers)
+        assert revoked.status_code == 200
+        assert revoked.json()["status"] == "REVOKED"
+
+
+def test_project_member_can_invite_existing_team_member_into_project() -> None:
+    with TestClient(app) as client:
+        observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
+        observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
+        forbidden = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=observer_headers,
+            json={"email": "member@quanyi.local", "role": "MEMBER", "project_id": "p-quanyi", "project_role": "MEMBER"},
+        )
+        assert forbidden.status_code == 403
+
+        member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
+        member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=member_headers,
+            json={"email": "observer@quanyi.local", "role": "MEMBER", "project_id": "p-quanyi", "project_role": "MEMBER"},
+        )
+        assert created.status_code == 200
+
+        accepted = client.post(f"/api/invitations/{created.json()['activation_token']}/accept-existing", headers=observer_headers)
+        assert accepted.status_code == 200
+        project_members = client.get("/api/projects/p-quanyi/members", headers=observer_headers).json()
+        assert any(item["id"] == "u-observer" for item in project_members)
 
 
 def test_all_authenticated_users_can_read_cross_team_projects_but_cannot_manage_them() -> None:
@@ -545,7 +608,9 @@ def test_team_admin_can_list_and_revoke_pending_invitation() -> None:
 
         member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()
         member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
-        assert client.get("/api/teams/team-quanyi/invitations", headers=member_headers).status_code == 403
+        member_list = client.get("/api/teams/team-quanyi/invitations", headers=member_headers)
+        assert member_list.status_code == 200
+        assert invitation_id not in {item["id"] for item in member_list.json()}
         assert client.post(f"/api/teams/team-quanyi/invitations/{invitation_id}/revoke", headers=member_headers).status_code == 403
 
 

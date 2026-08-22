@@ -36,11 +36,23 @@ def _pending_invitation(session: Session, token: str) -> Invitation:
     return invitation
 
 
-def _require_team_admin(session: Session, team_id: str, actor: User) -> TeamMember:
+def _require_team_member(session: Session, team_id: str, actor: User) -> TeamMember:
     membership = session.get(TeamMember, (team_id, actor.id))
-    if not membership or membership.role != TeamRole.CEO:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以管理邀请")
+    if not membership:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有当前团队成员可以发送或管理自己的邀请")
     return membership
+
+
+def _require_invitation_scope(session: Session, team_id: str, project_id: str | None, actor: User) -> tuple[TeamMember, Project | None]:
+    membership = _require_team_member(session, team_id, actor)
+    if not project_id:
+        return membership, None
+    project = session.get(Project, project_id)
+    if not project or project.team_id != team_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="邀请项目不属于当前团队")
+    if not session.get(ProjectMember, (project_id, actor.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有当前项目成员可以邀请其他人加入该项目")
+    return membership, project
 
 
 def _invitation_status(invitation: Invitation) -> str:
@@ -68,14 +80,19 @@ def _invitation_admin_read(session: Session, invitation: Invitation) -> Invitati
 
 
 def create_team_invitation(session: Session, team_id: str, payload: InvitationCreateRequest, actor: User) -> tuple[Invitation, str]:
-    _require_team_admin(session, team_id, actor)
+    membership, project = _require_invitation_scope(session, team_id, payload.project_id, actor)
     existing_user = session.exec(select(User).where(User.email == payload.email)).first()
-    if existing_user and session.get(TeamMember, (team_id, existing_user.id)):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该账号已经是团队成员")
-    if payload.project_id:
-        project = session.get(Project, payload.project_id)
-        if not project or project.team_id != team_id:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="邀请项目不属于当前团队")
+    if not existing_user and membership.role != TeamRole.CEO:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以邀请未注册邮箱创建账号")
+    if payload.role == TeamRole.CEO and membership.role != TeamRole.CEO:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以授予团队管理员角色")
+    if payload.project_role == ProjectRole.OWNER and membership.role != TeamRole.CEO:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有团队管理员可以授予项目所有者角色")
+    if existing_user:
+        if project and session.get(ProjectMember, (project.id, existing_user.id)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该账号已经是项目成员")
+        if not project and session.get(TeamMember, (team_id, existing_user.id)):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该账号已经是团队成员")
 
     now = utc_now()
     for existing in session.exec(select(Invitation).where(Invitation.team_id == team_id, Invitation.email == payload.email)).all():
@@ -103,16 +120,21 @@ def create_team_invitation(session: Session, team_id: str, payload: InvitationCr
 
 
 def list_team_invitations(session: Session, team_id: str, actor: User) -> list[InvitationAdminRead]:
-    _require_team_admin(session, team_id, actor)
-    rows = session.exec(select(Invitation).where(Invitation.team_id == team_id).order_by(Invitation.created_at.desc())).all()
+    membership = _require_team_member(session, team_id, actor)
+    statement = select(Invitation).where(Invitation.team_id == team_id)
+    if membership.role != TeamRole.CEO:
+        statement = statement.where(Invitation.invited_by == actor.id)
+    rows = session.exec(statement.order_by(Invitation.created_at.desc())).all()
     return [_invitation_admin_read(session, invitation) for invitation in rows]
 
 
 def revoke_team_invitation(session: Session, team_id: str, invitation_id: str, actor: User) -> InvitationAdminRead:
-    _require_team_admin(session, team_id, actor)
+    membership = _require_team_member(session, team_id, actor)
     invitation = session.get(Invitation, invitation_id)
     if not invitation or invitation.team_id != team_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="邀请不存在")
+    if membership.role != TeamRole.CEO and invitation.invited_by != actor.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只能管理自己发出的邀请")
     current_status = _invitation_status(invitation)
     if current_status == "ACCEPTED":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="已接受的邀请不能撤销")
@@ -160,11 +182,16 @@ def accept_existing_invitation(session: Session, token: str, actor: User) -> Inv
     invitation = _pending_invitation(session, token)
     if actor.email.lower() != invitation.email.lower():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该邀请不属于当前登录账号")
-    if session.get(TeamMember, (invitation.team_id, actor.id)):
+    team_membership = session.get(TeamMember, (invitation.team_id, actor.id))
+    project_membership = session.get(ProjectMember, (invitation.project_id, actor.id)) if invitation.project_id else None
+    if invitation.project_id and project_membership:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前账号已经是项目成员")
+    if not invitation.project_id and team_membership:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前账号已经是团队成员")
 
-    session.add(TeamMember(team_id=invitation.team_id, user_id=actor.id, role=invitation.role))
-    if invitation.project_id and not session.get(ProjectMember, (invitation.project_id, actor.id)):
+    if not team_membership:
+        session.add(TeamMember(team_id=invitation.team_id, user_id=actor.id, role=invitation.role))
+    if invitation.project_id:
         session.add(ProjectMember(
             project_id=invitation.project_id,
             user_id=actor.id,
