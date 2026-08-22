@@ -15,7 +15,8 @@ os.environ["AUTO_CREATE_SCHEMA"] = "true"
 from app.main import app
 from app.database import engine
 from app.external_reminders import reminder_level, scan_external_reminders
-from app.models import Project, Team, User
+from app.models import Project, Team, TeamRole, User
+from app.security import hash_password
 from sqlalchemy import event
 from sqlmodel import Session
 
@@ -406,6 +407,7 @@ def test_invitation_activation_and_real_team_membership() -> None:
         assert inspected.status_code == 200
         assert inspected.json()["team_name"] == "全意团队"
         assert inspected.json()["project_name"] == "全意 AI 工作中枢"
+        assert inspected.json()["account_exists"] is False
 
         activated = client.post(f"/api/invitations/{token}/accept", json={"name": "新成员", "password": "secure-member-2026"})
         assert activated.status_code == 200
@@ -419,6 +421,47 @@ def test_invitation_activation_and_real_team_membership() -> None:
         assert project_members.status_code == 200
         assert any(member["email"] == "new.member@quanyi.local" for member in project_members.json())
         assert client.post(f"/api/invitations/{token}/accept", json={"name": "重复成员", "password": "secure-member-2026"}).status_code == 410
+
+
+def test_existing_account_can_accept_team_invitation() -> None:
+    with Session(engine) as session:
+        session.add(User(
+            id="u-existing-invitee",
+            email="existing.invitee@quanyi.local",
+            password_hash=hash_password("existing-member-2026"),
+            name="已有账号",
+            role=TeamRole.MEMBER,
+        ))
+        session.commit()
+
+    with TestClient(app) as client:
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        created = client.post(
+            "/api/teams/team-quanyi/invitations",
+            headers=ceo_headers,
+            json={"email": "existing.invitee@quanyi.local", "role": "MEMBER"},
+        )
+        assert created.status_code == 200
+        token = created.json()["activation_token"]
+        inspected = client.get(f"/api/invitations/{token}")
+        assert inspected.status_code == 200
+        assert inspected.json()["account_exists"] is True
+
+        wrong_account = client.post(f"/api/invitations/{token}/accept-existing", headers=ceo_headers)
+        assert wrong_account.status_code == 403
+
+        member_login = client.post(
+            "/api/auth/login",
+            json={"email": "existing.invitee@quanyi.local", "password": "existing-member-2026"},
+        ).json()
+        member_headers = {"Authorization": f"Bearer {member_login['access_token']}"}
+        accepted = client.post(f"/api/invitations/{token}/accept-existing", headers=member_headers)
+        assert accepted.status_code == 200
+        assert accepted.json()["status"] == "ACCEPTED"
+        team = next(item for item in client.get("/api/teams", headers=member_headers).json() if item["id"] == "team-quanyi")
+        assert team["role"] == "MEMBER"
+        assert client.post(f"/api/invitations/{token}/accept-existing", headers=member_headers).status_code == 410
 
 
 def test_wecom_status_requires_login_and_never_exposes_access_token() -> None:

@@ -158,6 +158,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/invitations/{token}/accept-existing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Existing Account Invitation */
+        post: operations["activate_existing_account_invitation_api_invitations__token__accept_existing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/wecom/status": {
         parameters: {
             query?: never;
@@ -920,6 +937,8 @@ export interface components {
             team_name: string;
             /** Inviter Name */
             inviter_name: string;
+            /** Account Exists */
+            account_exists: boolean;
             role: components["schemas"]["TeamRole"];
             /** Project Name */
             project_name?: string | null;
@@ -1706,6 +1725,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_existing_account_invitation_api_invitations__token__accept_existing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationAdminRead"];
                 };
             };
             /** @description Validation Error */

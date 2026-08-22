@@ -81,6 +81,22 @@ def test_invitation_message_escapes_html() -> None:
     assert "invite=token&amp;next=1" in html_body
 
 
+def test_existing_account_invitation_asks_user_to_login() -> None:
+    settings = replace(load_settings(), smtp_from_email="sender@example.com")
+    message = build_invitation_message(
+        settings,
+        recipient="member@example.com",
+        team_name="测试团队",
+        inviter_name="邀请人",
+        activation_url="https://example.com/?invite=token",
+        account_exists=True,
+    )
+    plain_body = message.get_body(preferencelist=("plain",)).get_content()
+    html_body = message.get_body(preferencelist=("html",)).get_content()
+    assert "登录并接受团队邀请" in plain_body
+    assert "登录并接受团队邀请" in html_body
+
+
 def test_wecom_token_is_cached_and_not_added_to_document_body(monkeypatch) -> None:
     calls: list[tuple[str, bytes | None]] = []
 

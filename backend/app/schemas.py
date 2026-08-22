@@ -141,6 +141,7 @@ class InvitationPublicRead(ApiModel):
     email: str
     team_name: str
     inviter_name: str
+    account_exists: bool
     role: TeamRole
     project_name: str | None = None
     expires_at: datetime

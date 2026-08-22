@@ -60,6 +60,7 @@ export const fetchMe=()=>request<ApiUser>("/auth/me");
 export const changePassword=(currentPassword:string,newPassword:string)=>request<TokenResponse>("/auth/change-password",{method:"POST",body:JSON.stringify({current_password:currentPassword,new_password:newPassword})});
 export const inspectInvitation=(token:string)=>request<ApiInvitation>(`/invitations/${encodeURIComponent(token)}`);
 export const acceptInvitation=(token:string,payload:components["schemas"]["InvitationAcceptRequest"])=>request<TokenResponse>(`/invitations/${encodeURIComponent(token)}/accept`,{method:"POST",body:JSON.stringify(payload)});
+export const acceptExistingInvitation=(token:string)=>request<ApiInvitationAdmin>(`/invitations/${encodeURIComponent(token)}/accept-existing`,{method:"POST"});
 export const fetchTeams=()=>request<ApiTeam[]>("/teams");
 export const createTeamInvitation=(teamId:string,payload:components["schemas"]["InvitationCreateRequest"])=>request<ApiInvitationCreated>(`/teams/${teamId}/invitations`,{method:"POST",body:JSON.stringify(payload)});
 export const fetchTeamInvitations=(teamId:string)=>request<ApiInvitationAdmin[]>(`/teams/${teamId}/invitations`);

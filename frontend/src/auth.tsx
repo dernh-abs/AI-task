@@ -2,6 +2,7 @@ import { createContext, type FormEvent, type ReactNode, useContext, useEffect, u
 import { Bot, CheckCircle2, KeyRound, LogIn, ShieldCheck, UserPlus } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  acceptExistingInvitation,
   acceptInvitation,
   ApiError,
   changePassword as changePasswordRequest,
@@ -128,6 +129,35 @@ function ActivationPage({token,onLogin,currentUser,onLogout}:{token:string;onLog
     }
   };
 
+  const loginExistingAccount = async (event:FormEvent) => {
+    event.preventDefault();
+    if(!invitation)return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await login(invitation.email,password);
+      tokenStore.set(result.access_token,remember);
+      onLogin(result.user);
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "登录失败，请检查账号密码");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const acceptForExistingAccount = async () => {
+    setSubmitting(true);
+    setError("");
+    try {
+      await acceptExistingInvitation(token);
+      navigate("/",{replace:true});
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : "接受邀请失败，请联系邀请人");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const sameAccount = Boolean(currentUser&&invitation&&currentUser.email.toLowerCase()===invitation.email.toLowerCase());
 
   return (
@@ -140,7 +170,7 @@ function ActivationPage({token,onLogin,currentUser,onLogout}:{token:string;onLog
         </> : <>
           <div className="login-intro">
             <span className="activation-badge"><UserPlus size={15} /> 团队邀请</span>
-            <h1>{currentUser ? "确认邀请账号" : "激活你的账号"}</h1>
+            <h1>{invitation.account_exists ? "加入新的团队" : "激活你的账号"}</h1>
             <p>{invitation.inviter_name} 邀请你加入「{invitation.team_name}」{invitation.project_name ? `，并参与项目「${invitation.project_name}」` : ""}。</p>
           </div>
           <div className="invitation-summary">
@@ -151,13 +181,25 @@ function ActivationPage({token,onLogin,currentUser,onLogout}:{token:string;onLog
             <div>
               <strong>当前已登录</strong>
               <span>{currentUser.name} · {currentUser.email}</span>
-              <small>{sameAccount ? "该邮箱已经拥有账号，不能再次通过新账号邀请激活。请返回当前账号，或联系管理员重新处理成员权限。" : `此邀请发送给 ${invitation.email}，不能使用当前账号直接激活。请先退出当前账号，再继续激活受邀账号。`}</small>
+              <small>{sameAccount && invitation.account_exists ? "账号校验通过。确认后会加入受邀团队，不会创建重复账号。" : `此邀请发送给 ${invitation.email}，不能使用当前账号接受。请先退出，再登录受邀账号。`}</small>
             </div>
             <div className="active-session-actions">
-              <button className="auth-secondary" onClick={()=>navigate("/",{replace:true})}>返回当前账号</button>
-              {!sameAccount && <button className="auth-switch-account" onClick={onLogout}>退出并继续</button>}
+              {sameAccount && invitation.account_exists ? <button disabled={submitting} onClick={acceptForExistingAccount}>{submitting ? "正在加入…" : "接受并加入团队"}</button> : <>
+                <button className="auth-secondary" onClick={()=>navigate("/",{replace:true})}>返回当前账号</button>
+                <button className="auth-switch-account" onClick={onLogout}>退出并继续</button>
+              </>}
             </div>
-          </div> : <>
+            {error && <p className="login-error">{error}</p>}
+          </div> : invitation.account_exists ? <>
+            <form onSubmit={loginExistingAccount}>
+              <label><span>受邀账号</span><input type="email" value={invitation.email} readOnly /></label>
+              <label><span>登录密码</span><input autoFocus type="password" autoComplete="current-password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder="输入现有账号密码" /></label>
+              <RememberLogin checked={remember} onChange={setRemember} />
+              {error && <p className="login-error">{error}</p>}
+              <button disabled={submitting||!password}>{submitting ? "正在登录…" : <><LogIn size={16} /> 登录并继续</>}</button>
+            </form>
+            <footer><ShieldCheck size={15} /> 系统会先校验受邀邮箱；登录后仍需确认加入团队。</footer>
+          </> : <>
             <form onSubmit={submit}>
               <label><span>显示名称</span><input autoFocus value={name} onChange={(event)=>setName(event.target.value)} placeholder="你的真实姓名" minLength={2} maxLength={80} /></label>
               <label><span>设置密码</span><input type="password" autoComplete="new-password" value={password} onChange={(event)=>setPassword(event.target.value)} placeholder="至少 10 位，同时包含字母和数字" minLength={10} /></label>

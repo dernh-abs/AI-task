@@ -26,21 +26,23 @@ def build_invitation_message(
     team_name: str,
     inviter_name: str,
     activation_url: str,
+    account_exists: bool = False,
 ) -> EmailMessage:
     message = EmailMessage()
     message["Subject"] = f"邀请加入「{team_name}」"
     message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
     message["To"] = recipient
+    action_text = "登录并接受团队邀请" if account_exists else "完成注册并加入团队"
     message.set_content(
         f"{inviter_name} 邀请你加入「{team_name}」。\n\n"
-        f"请在 72 小时内打开以下一次性链接完成注册：\n{activation_url}\n\n"
+        f"请在 72 小时内打开以下一次性链接，{action_text}：\n{activation_url}\n\n"
         "如果你不认识邀请人，请忽略此邮件。"
     )
     message.add_alternative(
         "<html><body>"
         f"<p>{html.escape(inviter_name)} 邀请你加入「{html.escape(team_name)}」。</p>"
-        "<p>请在 72 小时内使用下面的一次性链接完成注册：</p>"
-        f'<p><a href="{html.escape(activation_url, quote=True)}">接受邀请并注册</a></p>'
+        f"<p>请在 72 小时内使用下面的一次性链接，{html.escape(action_text)}：</p>"
+        f'<p><a href="{html.escape(activation_url, quote=True)}">{html.escape(action_text)}</a></p>'
         "<p style=\"color:#667085\">如果你不认识邀请人，请忽略此邮件。</p>"
         "</body></html>",
         subtype="html",
@@ -59,6 +61,7 @@ def send_invitation_email(
     team_name: str,
     inviter_name: str,
     activation_token: str,
+    account_exists: bool = False,
 ) -> EmailDeliveryStatus:
     if not smtp_is_configured(settings):
         return "NOT_CONFIGURED"
@@ -70,6 +73,7 @@ def send_invitation_email(
             team_name=team_name,
             inviter_name=inviter_name,
             activation_url=invitation_url(settings, activation_token),
+            account_exists=account_exists,
         )
         if settings.smtp_use_ssl:
             with smtplib.SMTP_SSL(

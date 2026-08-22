@@ -399,6 +399,50 @@
         }
       }
     },
+    "/api/invitations/{token}/accept-existing": {
+      "post": {
+        "summary": "Activate Existing Account Invitation",
+        "operationId": "activate_existing_account_invitation_api_invitations__token__accept_existing_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationAdminRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/wecom/status": {
       "get": {
         "summary": "Wecom Status",
@@ -2848,6 +2892,10 @@
             "type": "string",
             "title": "Inviter Name"
           },
+          "account_exists": {
+            "type": "boolean",
+            "title": "Account Exists"
+          },
           "role": {
             "$ref": "#/components/schemas/TeamRole"
           },
@@ -2873,6 +2921,7 @@
           "email",
           "team_name",
           "inviter_name",
+          "account_exists",
           "role",
           "expires_at"
         ],

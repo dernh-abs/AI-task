@@ -69,8 +69,9 @@ def _invitation_admin_read(session: Session, invitation: Invitation) -> Invitati
 
 def create_team_invitation(session: Session, team_id: str, payload: InvitationCreateRequest, actor: User) -> tuple[Invitation, str]:
     _require_team_admin(session, team_id, actor)
-    if session.exec(select(User).where(User.email == payload.email)).first():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已经注册")
+    existing_user = session.exec(select(User).where(User.email == payload.email)).first()
+    if existing_user and session.get(TeamMember, (team_id, existing_user.id)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该账号已经是团队成员")
     if payload.project_id:
         project = session.get(Project, payload.project_id)
         if not project or project.team_id != team_id:
@@ -148,10 +149,44 @@ def invitation_public_read(session: Session, token: str) -> InvitationPublicRead
         email=invitation.email,
         team_name=team.name if team else "未知团队",
         inviter_name=inviter.name if inviter else "团队管理员",
+        account_exists=session.exec(select(User).where(User.email == invitation.email)).first() is not None,
         role=invitation.role,
         project_name=project.name if project else None,
         expires_at=invitation.expires_at,
     )
+
+
+def accept_existing_invitation(session: Session, token: str, actor: User) -> InvitationAdminRead:
+    invitation = _pending_invitation(session, token)
+    if actor.email.lower() != invitation.email.lower():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该邀请不属于当前登录账号")
+    if session.get(TeamMember, (invitation.team_id, actor.id)):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="当前账号已经是团队成员")
+
+    session.add(TeamMember(team_id=invitation.team_id, user_id=actor.id, role=invitation.role))
+    if invitation.project_id and not session.get(ProjectMember, (invitation.project_id, actor.id)):
+        session.add(ProjectMember(
+            project_id=invitation.project_id,
+            user_id=actor.id,
+            role=invitation.project_role or ProjectRole.MEMBER,
+        ))
+    invitation.accepted_at = utc_now()
+    session.add(invitation)
+    session.add(AuditEvent(
+        id=f"audit-{uuid4().hex}",
+        actor_id=actor.id,
+        resource_type="invitation",
+        resource_id=invitation.id,
+        action="ACCEPTED_EXISTING_ACCOUNT",
+        detail_json="{}",
+    ))
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="邀请已被使用或账号已加入团队") from exc
+    session.refresh(invitation)
+    return _invitation_admin_read(session, invitation)
 
 
 def accept_invitation(session: Session, token: str, payload: InvitationAcceptRequest) -> TokenResponse:

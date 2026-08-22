@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 
 from .config import load_settings
 from .agent_runs import recover_stale_runs, start_agent_run
-from .accounts import accept_invitation, change_user_password, create_team_invitation, invitation_public_read, list_team_invitations, readable_teams, revoke_team_invitation
+from .accounts import accept_existing_invitation, accept_invitation, change_user_password, create_team_invitation, invitation_public_read, list_team_invitations, readable_teams, revoke_team_invitation
 from .candidates import candidate_read, confirm_candidate
 from .database import create_schema, engine, get_session
 from .dependencies import get_current_user
@@ -96,6 +96,7 @@ def list_teams(user: User = Depends(get_current_user), session: Session = Depend
 
 @app.post("/api/teams/{team_id}/invitations", response_model=InvitationCreatedRead)
 def invite_team_member(team_id: str, payload: InvitationCreateRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationCreatedRead:
+    account_exists = session.exec(select(User).where(User.email == payload.email.strip().lower())).first() is not None
     invitation, token = create_team_invitation(session, team_id, payload, user)
     team = session.get(Team, team_id)
     email_delivery = send_invitation_email(
@@ -104,6 +105,7 @@ def invite_team_member(team_id: str, payload: InvitationCreateRequest, user: Use
         team_name=team.name if team else "团队",
         inviter_name=user.name,
         activation_token=token,
+        account_exists=account_exists,
     )
     return InvitationCreatedRead(id=invitation.id, email=invitation.email, team_id=invitation.team_id, expires_at=invitation.expires_at, activation_token=token, email_delivery=email_delivery)
 
@@ -126,6 +128,11 @@ def inspect_invitation(token: str, session: Session = Depends(get_session)) -> I
 @app.post("/api/invitations/{token}/accept", response_model=TokenResponse)
 def activate_invitation(token: str, payload: InvitationAcceptRequest, session: Session = Depends(get_session)) -> TokenResponse:
     return accept_invitation(session, token, payload)
+
+
+@app.post("/api/invitations/{token}/accept-existing", response_model=InvitationAdminRead)
+def activate_existing_account_invitation(token: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> InvitationAdminRead:
+    return accept_existing_invitation(session, token, user)
 
 
 @app.get("/api/integrations/wecom/status", response_model=WeComStatusRead)
