@@ -23,8 +23,8 @@
 - [ ] 设置强随机 `JWT_SECRET`，并将 `SEED_DEMO_DATA=false`。
 - [ ] 执行 `alembic upgrade head`；生产环境保持 `AUTO_CREATE_SCHEMA=false`。
 - [ ] 配置正确的 `CORS_ORIGINS` 与前端 `VITE_API_BASE_URL`。
-- [ ] 使用有效 `QWEN_API_KEY` 和 `AI_MODE=live` 完成至少一次候选提取 Live 调用。
-- [ ] 使用有效 `QWEN_API_KEY` 完成至少一次任务草稿 Live 调用，并核对调用日志中的模型、Prompt、Token、成本与 `execution_mode=LIVE`。
+- [ ] 使用有效 `DEEPSEEK_API_KEY`、`AI_PROVIDER=deepseek` 和 `AI_MODE=live` 完成至少一次候选提取 Live 调用。
+- [ ] 使用 `deepseek-v4-flash` 完成至少一次任务草稿 Live 调用，并核对调用日志中的模型、Prompt、Token、成本与 `execution_mode=LIVE`。
 - [ ] 人工走查桌面端关键路径：登录、建项目、建阶段、建任务、提交/退回/重提/验收、等待外部、候选确认、AI 草稿确认、贡献页。
 - [ ] 确认 Fallback 页面明确显示降级原因，不能作为 Live 验收证据。
 

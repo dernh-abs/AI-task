@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
 from urllib import request
@@ -49,6 +50,23 @@ class GatewayOutputError(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class LiveTarget:
+    """Resolved provider settings without exposing credentials to callers or APIs."""
+
+    provider: str
+    url: str
+    auth_header: str | None = field(repr=False)
+    model: str
+    use_json_format: bool
+    input_usd_per_million: float
+    output_usd_per_million: float
+
+    @property
+    def configured(self) -> bool:
+        return self.provider == "ollama" or bool(self.auth_header)
+
+
 class TextGatewayResult(BaseModel):
     text: str
     execution_mode: Literal["LIVE", "MOCK", "FALLBACK"]
@@ -67,8 +85,8 @@ def _mock_extract(content: str) -> CandidateExtraction:
     return CandidateExtraction(candidates=candidates)
 
 
-def _live_target(settings) -> tuple[str, str | None, str, bool]:
-    """Return (url, auth_header_or_None, model, use_json_format).
+def _live_target(settings) -> LiveTarget:
+    """Resolve one explicitly supported OpenAI-compatible provider.
 
     For the local Ollama provider we hit the OpenAI-compatible endpoint with no auth
     header, and we deliberately do NOT send response_format (small local models handle
@@ -77,13 +95,54 @@ def _live_target(settings) -> tuple[str, str | None, str, bool]:
     """
     if settings.ai_provider == "ollama":
         base = settings.ollama_base_url.rstrip("/")
-        return f"{base}/chat/completions", None, settings.ollama_model, False
+        return LiveTarget("ollama", f"{base}/chat/completions", None, settings.ollama_model, False, 0, 0)
+    if settings.ai_provider == "deepseek":
+        base = settings.deepseek_base_url.rstrip("/")
+        auth_header = f"Bearer {settings.deepseek_api_key}" if settings.deepseek_api_key else None
+        return LiveTarget(
+            "deepseek",
+            f"{base}/chat/completions",
+            auth_header,
+            settings.deepseek_model,
+            True,
+            0.14,
+            0.28,
+        )
+    if settings.ai_provider == "dashscope":
+        auth_header = f"Bearer {settings.qwen_api_key}" if settings.qwen_api_key else None
+        return LiveTarget(
+            "dashscope",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            auth_header,
+            settings.qwen_model,
+            True,
+            0.50,
+            1.50,
+        )
+    raise ValueError(f"unsupported AI provider: {settings.ai_provider}")
+
+
+def _provider_state(settings) -> tuple[LiveTarget | None, str, bool]:
+    """Return target, display model and readiness, failing closed on bad provider names."""
+    try:
+        target = _live_target(settings)
+    except ValueError:
+        return None, f"unsupported:{settings.ai_provider}", False
+    return target, target.model, target.configured
+
+
+def _estimate_cost(target: LiveTarget | None, input_tokens: int, output_tokens: int) -> float:
+    if target is None:
+        return 0
     return (
-        "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-        f"Bearer {settings.qwen_api_key}",
-        settings.qwen_model,
-        True,
-    )
+        input_tokens * target.input_usd_per_million
+        + output_tokens * target.output_usd_per_million
+    ) / 1_000_000
+
+
+def _cache_scope(settings, model: str) -> str:
+    """Separate cached outputs by execution mode, provider and model version."""
+    return f"{settings.ai_mode}:{settings.ai_provider}:{model}"
 
 
 def _live_chat(url: str, auth_header: str | None, model: str, prompt: str, use_json_format: bool) -> tuple[str, dict]:
@@ -206,9 +265,11 @@ def _build_extract_prompt(content: str) -> str:
 
 def extract_candidates(session: Session, project_id: str, content: str) -> GatewayResult:
     settings = load_settings()
-    live_model = settings.ollama_model if settings.ai_provider == "ollama" else settings.qwen_model
+    target, live_model, provider_ready = _provider_state(settings)
     input_hash = hashlib.sha256(content.encode()).hexdigest()
-    cache_key = hashlib.sha256(f"{project_id}:{PROMPT_VERSION}:{input_hash}".encode()).hexdigest()
+    cache_key = hashlib.sha256(
+        f"{project_id}:{PROMPT_VERSION}:{_cache_scope(settings, live_model)}:{input_hash}".encode()
+    ).hexdigest()
     cached = session.get(AiResponseCache, cache_key)
     if cached:
         stored = json.loads(cached.response_json)
@@ -218,20 +279,20 @@ def extract_candidates(session: Session, project_id: str, content: str) -> Gatew
     degraded = False
     fallback_reason = None
     usage: dict = {}
-    live_requested = settings.ai_mode == "live" and (
-        settings.ai_provider == "ollama" or bool(settings.qwen_api_key)
-    )
+    live_requested = settings.ai_mode == "live" and provider_ready
     today = datetime.now(timezone.utc).date().isoformat()
     spent = sum(row.cost_usd for row in session.exec(select(AiCallLog).where(AiCallLog.project_id == project_id)).all() if row.created_at.date().isoformat() == today)
-    if live_requested and spent >= settings.ai_daily_budget_usd:
+    if settings.ai_mode == "live" and not provider_ready:
+        data, mode, degraded, fallback_reason = _mock_extract(content), AiExecutionMode.FALLBACK, True, "PROVIDER_NOT_CONFIGURED"
+    elif live_requested and spent >= settings.ai_daily_budget_usd:
         data, mode, degraded, fallback_reason = _mock_extract(content), AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
     elif live_requested:
-        url, auth_header, model, use_json = _live_target(settings)
+        assert target is not None
         prompt = _build_extract_prompt(content)
         last_error: Exception | None = None
         for _attempt in range(3):
             try:
-                raw_text, usage = _live_chat(url, auth_header, model, prompt, use_json)
+                raw_text, usage = _live_chat(target.url, target.auth_header, target.model, prompt, target.use_json_format)
                 candidates = _sanitize_candidates(_coerce_json_object(raw_text))
                 if not candidates:
                     raise ValueError("model returned no usable candidates")
@@ -247,7 +308,7 @@ def extract_candidates(session: Session, project_id: str, content: str) -> Gatew
     latency_ms = round((time.perf_counter() - started) * 1000)
     input_tokens = int(usage.get("prompt_tokens", max(1, len(content) // 4)))
     output_tokens = int(usage.get("completion_tokens", max(1, len(data.model_dump_json()) // 4)))
-    cost = (input_tokens * 0.0000005 + output_tokens * 0.0000015) if mode == AiExecutionMode.LIVE else 0
+    cost = _estimate_cost(target, input_tokens, output_tokens) if mode == AiExecutionMode.LIVE else 0
     call_id = f"call-{uuid4().hex}"
     recorded_model = live_model if mode == AiExecutionMode.LIVE else "deterministic-mock-v1"
     session.add(AiCallLog(id=call_id, project_id=project_id, capability="candidate_extraction", prompt_version=PROMPT_VERSION, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost, success=True))
@@ -258,10 +319,12 @@ def extract_candidates(session: Session, project_id: str, content: str) -> Gatew
 
 def generate_task_draft(session: Session, project_id: str, task_context: str) -> TextGatewayResult:
     settings = load_settings()
-    live_model = settings.ollama_model if settings.ai_provider == "ollama" else settings.qwen_model
+    target, live_model, provider_ready = _provider_state(settings)
     prompt_version = "task-draft-v1"
     input_hash = hashlib.sha256(task_context.encode()).hexdigest()
-    cache_key = hashlib.sha256(f"{project_id}:{prompt_version}:{input_hash}".encode()).hexdigest()
+    cache_key = hashlib.sha256(
+        f"{project_id}:{prompt_version}:{_cache_scope(settings, live_model)}:{input_hash}".encode()
+    ).hexdigest()
     cached = session.get(AiResponseCache, cache_key)
     if cached:
         stored = json.loads(cached.response_json)
@@ -270,15 +333,15 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
     started = time.perf_counter()
     mode, degraded, fallback_reason, usage, attempt_count = AiExecutionMode.MOCK, False, None, {}, 1
     text = f"AI 草稿\n\n基于任务上下文完成初稿：\n{task_context}\n\n请负责人核对事实、补充证据并确认后提交验收。"
-    live_requested = settings.ai_mode == "live" and (
-        settings.ai_provider == "ollama" or bool(settings.qwen_api_key)
-    )
+    live_requested = settings.ai_mode == "live" and provider_ready
     today = datetime.now(timezone.utc).date().isoformat()
     spent = sum(row.cost_usd for row in session.exec(select(AiCallLog).where(AiCallLog.project_id == project_id)).all() if row.created_at.date().isoformat() == today)
-    if live_requested and spent >= settings.ai_daily_budget_usd:
+    if settings.ai_mode == "live" and not provider_ready:
+        mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "PROVIDER_NOT_CONFIGURED"
+    elif live_requested and spent >= settings.ai_daily_budget_usd:
         mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
     elif live_requested:
-        url, auth_header, model, _use_json = _live_target(settings)
+        assert target is not None
         prompt = "根据以下任务信息生成可直接人工复核的交付草稿，不要声称已完成未执行的外部动作：\n" + task_context
         last_error: Exception | None = None
         for _attempt in range(2):
@@ -286,7 +349,7 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
             try:
                 # Task drafts are free-form text. DashScope rejects json_object mode
                 # when the prompt does not explicitly request a JSON response.
-                candidate_text, usage = _live_chat(url, auth_header, model, prompt, False)
+                candidate_text, usage = _live_chat(target.url, target.auth_header, target.model, prompt, False)
                 if not candidate_text:
                     raise ValueError("empty model output")
                 text, mode = candidate_text, AiExecutionMode.LIVE
@@ -299,7 +362,7 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
     call_id = f"call-{uuid4().hex}"
     input_tokens = int(usage.get("prompt_tokens", max(1, len(task_context) // 4)))
     output_tokens = int(usage.get("completion_tokens", max(1, len(text) // 4)))
-    session.add(AiCallLog(id=call_id, project_id=project_id, capability="task_draft", prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=round((time.perf_counter() - started) * 1000), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=(input_tokens * 0.0000005 + output_tokens * 0.0000015) if mode == AiExecutionMode.LIVE else 0, success=True))
+    session.add(AiCallLog(id=call_id, project_id=project_id, capability="task_draft", prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=round((time.perf_counter() - started) * 1000), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=_estimate_cost(target, input_tokens, output_tokens) if mode == AiExecutionMode.LIVE else 0, success=True))
     result = TextGatewayResult(text=text, execution_mode=mode.value, degraded=degraded, fallback_reason=fallback_reason, call_id=call_id, attempt_count=attempt_count)
     session.add(AiResponseCache(cache_key=cache_key, response_json=result.model_dump_json()))
     return result
@@ -307,11 +370,13 @@ def generate_task_draft(session: Session, project_id: str, task_context: str) ->
 
 def generate_project_chat_reply(session: Session, project_id: str, question: str, task_context: str) -> TextGatewayResult:
     settings = load_settings()
-    live_model = settings.ollama_model if settings.ai_provider == "ollama" else settings.qwen_model
+    target, live_model, provider_ready = _provider_state(settings)
     prompt_version = "project-chat-v1"
     grounded_input = f"问题：{question}\n\n当前项目任务：\n{task_context or '当前项目暂无任务。'}"
     input_hash = hashlib.sha256(grounded_input.encode()).hexdigest()
-    cache_key = hashlib.sha256(f"{project_id}:{prompt_version}:{input_hash}".encode()).hexdigest()
+    cache_key = hashlib.sha256(
+        f"{project_id}:{prompt_version}:{_cache_scope(settings, live_model)}:{input_hash}".encode()
+    ).hexdigest()
     cached = session.get(AiResponseCache, cache_key)
     if cached:
         stored = json.loads(cached.response_json)
@@ -324,13 +389,15 @@ def generate_project_chat_reply(session: Session, project_id: str, question: str
         text = f"我只读取了当前项目中可见的任务。根据现有任务，建议先处理以下事项：\n{task_context}\n\n会议和资产尚未接入本次回答。"
     else:
         text = "当前项目暂无可引用任务，因此无法基于项目事实给出进度判断。会议和资产尚未接入本次回答。"
-    live_requested = settings.ai_mode == "live" and (settings.ai_provider == "ollama" or bool(settings.qwen_api_key))
+    live_requested = settings.ai_mode == "live" and provider_ready
     today = datetime.now(timezone.utc).date().isoformat()
     spent = sum(row.cost_usd for row in session.exec(select(AiCallLog).where(AiCallLog.project_id == project_id)).all() if row.created_at.date().isoformat() == today)
-    if live_requested and spent >= settings.ai_daily_budget_usd:
+    if settings.ai_mode == "live" and not provider_ready:
+        mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "PROVIDER_NOT_CONFIGURED"
+    elif live_requested and spent >= settings.ai_daily_budget_usd:
         mode, degraded, fallback_reason = AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
     elif live_requested:
-        url, auth_header, model, _use_json = _live_target(settings)
+        assert target is not None
         prompt = (
             "你是项目协作助手。只能根据下面提供的当前项目任务回答，不得声称读取了会议、资产、聊天或其他项目。"
             "回答中应明确引用相关任务标题；信息不足时直接说明。不要执行外部动作，也不要把建议冒充已完成事项。\n\n"
@@ -340,7 +407,7 @@ def generate_project_chat_reply(session: Session, project_id: str, question: str
         for _attempt in range(2):
             attempt_count = _attempt + 1
             try:
-                candidate_text, usage = _live_chat(url, auth_header, model, prompt, False)
+                candidate_text, usage = _live_chat(target.url, target.auth_header, target.model, prompt, False)
                 if not candidate_text:
                     raise ValueError("empty model output")
                 text, mode = candidate_text, AiExecutionMode.LIVE
@@ -354,7 +421,7 @@ def generate_project_chat_reply(session: Session, project_id: str, question: str
     call_id = f"call-{uuid4().hex}"
     input_tokens = int(usage.get("prompt_tokens", max(1, len(grounded_input) // 4)))
     output_tokens = int(usage.get("completion_tokens", max(1, len(text) // 4)))
-    session.add(AiCallLog(id=call_id, project_id=project_id, capability="project_chat", prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=round((time.perf_counter() - started) * 1000), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=(input_tokens * 0.0000005 + output_tokens * 0.0000015) if mode == AiExecutionMode.LIVE else 0, success=True))
+    session.add(AiCallLog(id=call_id, project_id=project_id, capability="project_chat", prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=round((time.perf_counter() - started) * 1000), input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=_estimate_cost(target, input_tokens, output_tokens) if mode == AiExecutionMode.LIVE else 0, success=True))
     result = TextGatewayResult(text=text, execution_mode=mode.value, degraded=degraded, fallback_reason=fallback_reason, call_id=call_id, attempt_count=attempt_count)
     session.add(AiResponseCache(cache_key=cache_key, response_json=result.model_dump_json()))
     return result

@@ -28,6 +28,9 @@ class Settings:
     seed_demo_data: bool
     ai_mode: str
     ai_provider: str
+    deepseek_api_key: str | None
+    deepseek_base_url: str
+    deepseek_model: str
     qwen_api_key: str | None
     qwen_model: str
     ollama_base_url: str
@@ -62,7 +65,10 @@ def load_settings() -> Settings:
         cors_origins=tuple(item.strip() for item in origins.split(",") if item.strip()),
         seed_demo_data=_as_bool(os.getenv("SEED_DEMO_DATA"), False),
         ai_mode=os.getenv("AI_MODE", "mock").lower(),
-        ai_provider=os.getenv("AI_PROVIDER", "dashscope").lower(),
+        ai_provider=os.getenv("AI_PROVIDER", "deepseek").lower(),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
+        deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
         qwen_api_key=os.getenv("QWEN_API_KEY"),
         qwen_model=os.getenv("QWEN_MODEL", "qwen-turbo"),
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),

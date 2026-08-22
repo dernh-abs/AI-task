@@ -11,7 +11,7 @@
 
 ## 当前阶段
 
-规划中的必做开发阶段 0–6 已实现。当前处于发布验收：自动化与 Mock 模式已通过；正式 MVP 放行仍须使用有效 `QWEN_API_KEY` 完成至少一次候选提取和一次任务草稿的 Live 验收，详见 `docs/release-checklist.md`。
+规划中的必做开发阶段 0–6 已实现。当前处于发布验收：自动化与 Mock 模式已通过；正式 MVP 放行仍须使用有效 `DEEPSEEK_API_KEY` 完成至少一次候选提取和一次任务草稿的 Live 验收，详见 `docs/release-checklist.md`。
 
 P0/P1 演示残留已完成收口：候选、任务状态、AgentRun 和项目 AI 对话均使用服务端数据；开放认领、个人跨项目 AI、通知写入及知识/资产/能力等未接入功能已隐藏、只读或禁用。可写入口边界见 `docs/button-truth-matrix.md`。
 
@@ -32,7 +32,7 @@ P0/P1 演示残留已完成收口：候选、任务状态、AgentRun 和项目 A
 
 阶段 4：Model Gateway 与候选提取闭环已实现。
 
-- `AI_MODE=mock` 默认使用确定性本地提取；`live` 模式直连 Qwen，并设超时、一次重试和单项目日预算预检。
+- `AI_MODE=mock` 默认使用确定性本地提取；`live` 模式通过统一网关连接 DeepSeek、百炼或 Ollama，并设超时、重试和单项目日预算预检。
 - 每次非缓存调用记录模型、Prompt 版本、模式、耗时、Token、估算成本、降级状态与原因。
 - 模型输出先经过严格结构校验；Live 失败使用 `FALLBACK`，前端明确显示降级，不能冒充真实 AI。
 - 原文保存为不可变 `SourceSnapshot`，候选为独立实体；人工可修改、忽略或确认。
