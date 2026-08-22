@@ -258,11 +258,13 @@ class CandidateTask(SQLModel, table=True):
     id: str = Field(primary_key=True)
     source_snapshot_id: str = Field(foreign_key="sourcesnapshot.id", index=True)
     project_id: str = Field(foreign_key="project.id", index=True)
+    stage_id: str | None = Field(default=None, foreign_key="stage.id", index=True)
     title: str
     description: str = Field(default="", sa_column=Column(Text, nullable=False))
     deliverable: str
     owner_id: str | None = Field(default=None, foreign_key="user.id")
     reviewer_id: str | None = Field(default=None, foreign_key="user.id")
+    execution_mode: ExecutionMode = Field(default=ExecutionMode.HUMAN, sa_column=Column(String(16), nullable=False))
     due_at: datetime | None = None
     confidence: int
     evidence: str = Field(default="", sa_column=Column(Text, nullable=False))

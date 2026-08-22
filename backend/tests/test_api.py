@@ -200,6 +200,53 @@ def test_candidate_extraction_edit_confirm_and_idempotency() -> None:
         assert cached.json()["cached"] is True
 
 
+def test_project_decomposition_assignment_and_real_overview() -> None:
+    with TestClient(app) as client:
+        observer_login = client.post("/api/auth/login", json={"email": "observer@quanyi.local", "password": "mvp-observer-2026"}).json()
+        observer_headers = {"Authorization": f"Bearer {observer_login['access_token']}"}
+        denied = client.post("/api/projects/p-quanyi/decompositions", headers=observer_headers, json={"instruction": "拆成可执行小任务", "max_candidates": 3})
+        assert denied.status_code == 403
+
+        ceo_login = client.post("/api/auth/login", json={"email": "ceo@quanyi.local", "password": "mvp-ceo-2026"}).json()
+        ceo_headers = {"Authorization": f"Bearer {ceo_login['access_token']}"}
+        before = client.get("/api/projects/p-quanyi/task-overview", headers=ceo_headers)
+        assert before.status_code == 200
+        created = client.post("/api/projects/p-quanyi/decompositions", headers=ceo_headers, json={"instruction": "优先形成可验收交付物", "max_candidates": 3})
+        assert created.status_code == 200
+        assert created.json()["execution_mode"] == "MOCK"
+        assert len(created.json()["candidates"]) == 3
+        candidate = created.json()["candidates"][0]
+        assert candidate["stage_id"] == "s-quanyi-1"
+        replay = client.post("/api/projects/p-quanyi/decompositions", headers=ceo_headers, json={"instruction": "优先形成可验收交付物", "max_candidates": 3})
+        assert replay.status_code == 200
+        assert replay.json()["cached"] is True
+        assert replay.json()["snapshot_id"] == created.json()["snapshot_id"]
+        assert [item["id"] for item in replay.json()["candidates"]] == [item["id"] for item in created.json()["candidates"]]
+
+        edited = client.patch(
+            f"/api/candidates/{candidate['id']}",
+            headers=ceo_headers,
+            json={"expected_version": candidate["version"], "owner_id": "u-member", "reviewer_id": "u-ceo", "stage_id": "s-quanyi-1", "execution_mode": "AI"},
+        )
+        assert edited.status_code == 200
+        confirmed = client.post(
+            f"/api/candidates/{candidate['id']}/confirm",
+            headers={**ceo_headers, "Idempotency-Key": "project-decompose-confirm"},
+            json={"expected_version": edited.json()["version"]},
+        )
+        assert confirmed.status_code == 200
+        assert confirmed.json()["task"]["execution_mode"] == "AI"
+        assert confirmed.json()["task"]["stage_id"] == "s-quanyi-1"
+        assert confirmed.json()["task"]["status"] == "PENDING_OWNER_CONFIRMATION"
+
+        overview = client.get("/api/projects/p-quanyi/task-overview", headers=observer_headers)
+        assert overview.status_code == 200
+        assert overview.json()["task_count"] == before.json()["task_count"] + 1
+        assert overview.json()["active_candidate_count"] >= 2
+        member_load = next(item for item in overview.json()["member_workloads"] if item["user_id"] == "u-member")
+        assert member_load["task_count"] >= 1
+
+
 def test_agent_run_human_confirmation_and_review() -> None:
     with TestClient(app) as client:
         member_login = client.post("/api/auth/login", json={"email": "member@quanyi.local", "password": "mvp-member-2026"}).json()

@@ -12,7 +12,7 @@ from .state_machine import DomainError
 
 
 def candidate_read(candidate: CandidateTask) -> CandidateRead:
-    return CandidateRead(id=candidate.id, source_snapshot_id=candidate.source_snapshot_id, project_id=candidate.project_id, title=candidate.title, description=candidate.description, deliverable=candidate.deliverable, owner_id=candidate.owner_id, reviewer_id=candidate.reviewer_id, due_at=candidate.due_at, confidence=candidate.confidence, evidence=candidate.evidence, status=str(candidate.status), created_task_id=candidate.created_task_id, version=candidate.version)
+    return CandidateRead(id=candidate.id, source_snapshot_id=candidate.source_snapshot_id, project_id=candidate.project_id, stage_id=candidate.stage_id, title=candidate.title, description=candidate.description, deliverable=candidate.deliverable, owner_id=candidate.owner_id, reviewer_id=candidate.reviewer_id, execution_mode=candidate.execution_mode, due_at=candidate.due_at, confidence=candidate.confidence, evidence=candidate.evidence, status=str(candidate.status), created_task_id=candidate.created_task_id, version=candidate.version)
 
 
 def confirm_candidate(session: Session, candidate: CandidateTask, actor: User, expected_version: int, idempotency_key: str) -> tuple[Task, bool]:
@@ -35,7 +35,12 @@ def confirm_candidate(session: Session, candidate: CandidateTask, actor: User, e
     for user_id in {candidate.owner_id, candidate.reviewer_id}:
         if project.owner_id != user_id and not session.get(ProjectMember, (project.id, user_id)):
             raise DomainError(422, "PROJECT_MEMBER_REQUIRED", "Owner and reviewer must belong to the project")
-    task = Task(id=f"task-{uuid4().hex}", project_id=project.id, title=candidate.title, description=candidate.description, deliverable=candidate.deliverable, acceptance=candidate.deliverable, owner_id=candidate.owner_id, reviewer_id=candidate.reviewer_id, status=TaskStatus.TODO if candidate.owner_id == actor.id else TaskStatus.PENDING_OWNER_CONFIRMATION, execution_mode=ExecutionMode.HUMAN, priority="MEDIUM", progress=0, due_at=candidate.due_at, source=f"候选提取 · {candidate.source_snapshot_id}")
+    if candidate.stage_id:
+        from .models import Stage
+        stage = session.get(Stage, candidate.stage_id)
+        if not stage or stage.project_id != project.id:
+            raise DomainError(422, "PROJECT_STAGE_REQUIRED", "Stage must belong to the project")
+    task = Task(id=f"task-{uuid4().hex}", project_id=project.id, stage_id=candidate.stage_id, title=candidate.title, description=candidate.description, deliverable=candidate.deliverable, acceptance=candidate.deliverable, owner_id=candidate.owner_id, reviewer_id=candidate.reviewer_id, status=TaskStatus.TODO if candidate.owner_id == actor.id else TaskStatus.PENDING_OWNER_CONFIRMATION, execution_mode=ExecutionMode(candidate.execution_mode), priority="MEDIUM", progress=0, due_at=candidate.due_at, source=f"候选提取 · {candidate.source_snapshot_id}")
     session.add(task)
     # CandidateTask.created_task_id references this row. Persist it first so
     # databases with enforced foreign keys do not update the candidate early.

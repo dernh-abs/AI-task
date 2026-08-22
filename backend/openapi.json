@@ -765,6 +765,104 @@
         }
       }
     },
+    "/api/projects/{project_id}/decompositions": {
+      "post": {
+        "summary": "Decompose Project",
+        "operationId": "decompose_project_api_projects__project_id__decompositions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectDecompositionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateExtractionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/task-overview": {
+      "get": {
+        "summary": "Project Task Overview",
+        "operationId": "project_task_overview_api_projects__project_id__task_overview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectTaskOverviewRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/conversations": {
       "get": {
         "summary": "List Project Conversations",
@@ -2281,6 +2379,17 @@
             "type": "string",
             "title": "Project Id"
           },
+          "stage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Id"
+          },
           "title": {
             "type": "string",
             "title": "Title"
@@ -2314,6 +2423,9 @@
               }
             ],
             "title": "Reviewer Id"
+          },
+          "execution_mode": {
+            "$ref": "#/components/schemas/ExecutionMode"
           },
           "due_at": {
             "anyOf": [
@@ -2360,11 +2472,13 @@
           "id",
           "source_snapshot_id",
           "project_id",
+          "stage_id",
           "title",
           "description",
           "deliverable",
           "owner_id",
           "reviewer_id",
+          "execution_mode",
           "due_at",
           "confidence",
           "evidence",
@@ -2413,6 +2527,17 @@
             ],
             "title": "Deliverable"
           },
+          "stage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Id"
+          },
           "owner_id": {
             "anyOf": [
               {
@@ -2434,6 +2559,16 @@
               }
             ],
             "title": "Reviewer Id"
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "due_at": {
             "anyOf": [
@@ -3207,6 +3342,25 @@
         ],
         "title": "ProjectCreateRequest"
       },
+      "ProjectDecompositionRequest": {
+        "properties": {
+          "instruction": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Instruction",
+            "default": ""
+          },
+          "max_candidates": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Max Candidates",
+            "default": 8
+          }
+        },
+        "type": "object",
+        "title": "ProjectDecompositionRequest"
+      },
       "ProjectMemberRead": {
         "properties": {
           "id": {
@@ -3238,6 +3392,44 @@
           "is_active"
         ],
         "title": "ProjectMemberRead"
+      },
+      "ProjectMemberWorkloadRead": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "task_count": {
+            "type": "integer",
+            "title": "Task Count"
+          },
+          "active_count": {
+            "type": "integer",
+            "title": "Active Count"
+          },
+          "attention_count": {
+            "type": "integer",
+            "title": "Attention Count"
+          },
+          "completed_count": {
+            "type": "integer",
+            "title": "Completed Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "name",
+          "task_count",
+          "active_count",
+          "attention_count",
+          "completed_count"
+        ],
+        "title": "ProjectMemberWorkloadRead"
       },
       "ProjectRead": {
         "properties": {
@@ -3344,6 +3536,60 @@
           "VIEWER"
         ],
         "title": "ProjectRole"
+      },
+      "ProjectTaskOverviewRead": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "正常",
+              "有风险",
+              "需关注"
+            ],
+            "title": "Health"
+          },
+          "task_count": {
+            "type": "integer",
+            "title": "Task Count"
+          },
+          "active_candidate_count": {
+            "type": "integer",
+            "title": "Active Candidate Count"
+          },
+          "status_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Status Counts"
+          },
+          "member_workloads": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectMemberWorkloadRead"
+            },
+            "type": "array",
+            "title": "Member Workloads"
+          }
+        },
+        "type": "object",
+        "required": [
+          "project_id",
+          "progress",
+          "health",
+          "task_count",
+          "active_candidate_count",
+          "status_counts",
+          "member_workloads"
+        ],
+        "title": "ProjectTaskOverviewRead"
       },
       "ProjectUpdateRequest": {
         "properties": {

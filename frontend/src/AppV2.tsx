@@ -93,7 +93,7 @@ import {
   type Task,
   type TaskStatus,
 } from "./workHubData";
-import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createProjectConversation, createStage, createTask, createTeamInvitation, createWeComDocument, fetchAgentRuns, fetchAllAgentRuns, fetchCandidates, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectChatMessages, fetchProjectConversations, fetchProjectMembers, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, fetchWeComStatus, ignoreCandidate, performTaskAction, revokeTeamInvitation, sendProjectChatMessage, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectChatMessage, type ApiProjectConversation, type ApiProjectMember, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam, type ApiWeComDocument, type ApiWeComStatus } from "./api";
+import { ApiError, confirmCandidate, createCandidateExtraction, createProject, createProjectConversation, createStage, createTask, createTeamInvitation, createWeComDocument, decomposeProject, fetchAgentRuns, fetchAllAgentRuns, fetchCandidates, fetchContributions, fetchExternalContacts, fetchExternalDependency, fetchProjectChatMessages, fetchProjectConversations, fetchProjectMembers, fetchProjectTaskOverview, fetchProjects, fetchTaskSubmissions, fetchTasks, fetchTeamInvitations, fetchTeams, fetchWeComStatus, ignoreCandidate, performTaskAction, revokeTeamInvitation, sendProjectChatMessage, startAgentRun, updateCandidate, updateStage, type ApiAgentRun, type ApiCandidate, type ApiContribution, type ApiExternalContact, type ApiExternalDependency, type ApiInvitationAdmin, type ApiProject, type ApiProjectChatMessage, type ApiProjectConversation, type ApiProjectMember, type ApiProjectTaskOverview, type ApiSubmission, type ApiTask, type ApiTaskActionRequest, type ApiTeam, type ApiWeComDocument, type ApiWeComStatus } from "./api";
 import { useAuth } from "./auth";
 import "./workHub.css";
 
@@ -1255,6 +1255,39 @@ function CreateStageModal({ project, onClose, onSaved }: { project: Project; onC
   return <AppModal title="新增项目阶段" subtitle="阶段使用独立状态，进度和风险由所属任务在服务端聚合。" onClose={onClose}><form className="form-stack" onSubmit={submit}><label><span>阶段名称</span><input autoFocus value={name} onChange={(event)=>setName(event.target.value)} placeholder="例如：方案设计"/></label><div className="form-grid"><label><span>负责人 *</span><select value={ownerId} onChange={(event)=>setOwnerId(event.target.value)}><option value="">请选择负责人</option>{members.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label><label><span>聚合权重</span><input type="number" min="0.1" max="100" step="0.1" value={weight} onChange={(event)=>setWeight(Number(event.target.value))}/></label></div>{error&&<p className="login-error">{error}</p>}<footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={!name.trim()||!ownerId||busy}>{busy?"创建中…":"创建阶段"}</button></footer></form></AppModal>;
 }
 
+function ProjectDecompositionModal({project,onClose,onCreated}:{project:Project;onClose:()=>void;onCreated:(items:ApiCandidate[])=>void}) {
+  const {notify}=useHub();
+  const [instruction,setInstruction]=useState("");
+  const [maxCandidates,setMaxCandidates]=useState(8);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const submit=async(event:FormEvent)=>{event.preventDefault();setBusy(true);setError("");try{const result=await decomposeProject(project.id,{instruction:instruction.trim(),max_candidates:maxCandidates});onCreated(result.candidates);notify(`${result.execution_mode==="LIVE"?"真实 AI":result.execution_mode==="FALLBACK"?"降级模式":"本地 Mock"}已生成 ${result.candidates.length} 个候选，等待人工分配确认`);onClose();}catch(reason){setError(reason instanceof ApiError?reason.message:"项目拆解失败");}finally{setBusy(false);}};
+  return <AppModal title={`AI 拆解「${project.name}」`} subtitle="系统读取项目目标、阶段、现有任务和项目成员，只生成候选，不直接分发正式任务。" onClose={onClose} size="lg"><form className="form-stack" onSubmit={submit}><div className="permission-note"><ShieldCheck size={17}/><span>所有候选都需要人工打开、修改负责人和执行方式并确认；AI 无权直接完成任务。</span></div><label><span>本次拆解重点（可选）</span><textarea autoFocus value={instruction} onChange={(event)=>setInstruction(event.target.value)} placeholder="例如：优先拆出两周内可验收的交付物，避免重复现有任务。"/></label><label><span>最多生成候选数</span><select value={maxCandidates} onChange={(event)=>setMaxCandidates(Number(event.target.value))}>{[4,6,8,10,12,16,20].map((value)=><option key={value} value={value}>{value} 个</option>)}</select></label>{error&&<p className="login-error">{error}</p>}<footer className="modal-actions"><button type="button" className="button secondary" onClick={onClose}>取消</button><button className="button primary" disabled={busy}><WandSparkles size={16}/>{busy?"正在分析项目…":"生成候选小任务"}</button></footer></form></AppModal>;
+}
+
+function ProjectTaskOverview({project,canDecompose}:{project:Project;canDecompose:boolean}) {
+  const {tasks,candidates,setCandidates,openTask,openCandidate,notify}=useHub();
+  const [overview,setOverview]=useState<ApiProjectTaskOverview|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const [decompositionOpen,setDecompositionOpen]=useState(false);
+  const [selectedOwner,setSelectedOwner]=useState("");
+  const projectTasks=tasks.filter((task)=>task.projectId===project.id&&(!selectedOwner||task.owner===overview?.member_workloads.find((item)=>item.user_id===selectedOwner)?.name));
+  const projectCandidates=candidates.filter((candidate)=>candidate.project_id===project.id&&candidate.status==="ACTIVE"&&(!selectedOwner||candidate.owner_id===selectedOwner));
+  const load=async()=>{setLoading(true);setError("");try{const [summary,rows]=await Promise.all([fetchProjectTaskOverview(project.id),fetchCandidates(project.id)]);setOverview(summary);const active=rows.filter((item)=>item.status==="ACTIVE");setCandidates((items)=>[...active,...items.filter((item)=>item.project_id!==project.id)]);}catch(reason){setError(reason instanceof ApiError?reason.message:"任务总览读取失败");}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[project.id]);
+  const counts=overview?.status_counts||{};
+  const metrics=[{label:"AI 候选",value:overview?.active_candidate_count||0,tone:"candidate"},{label:"待接收",value:counts.PENDING_OWNER_CONFIRMATION||0,tone:"pending"},{label:"执行中",value:(counts.TODO||0)+(counts.IN_PROGRESS||0),tone:"active"},{label:"待确认 / 验收",value:(counts.WAITING_HUMAN_CONFIRMATION||0)+(counts.WAITING_REVIEW||0),tone:"review"},{label:"阻塞 / 等待",value:(counts.BLOCKED||0)+(counts.WAITING_EXTERNAL||0),tone:"attention"},{label:"已完成",value:counts.DONE||0,tone:"done"}];
+  return <div className="project-task-overview-page">
+    <section className="project-command-panel panel"><div><span className="section-kicker">PROJECT COMMAND CENTER</span><h2>单项目任务总览</h2><p>进度、候选、正式任务与成员负荷全部来自服务端真实数据。</p></div><div className="project-command-progress"><strong>{overview?.progress??project.progress}%</strong><span>{overview?.health||project.health}</span></div>{canDecompose&&<button className="button primary" onClick={()=>setDecompositionOpen(true)}><WandSparkles size={16}/> AI 拆解项目</button>}</section>
+    {error&&<p className="login-error">{error}</p>}
+    <section className="project-overview-metrics">{metrics.map((item)=><article className={item.tone} key={item.label}><span>{item.label}</span><strong>{loading?"—":item.value}</strong></article>)}</section>
+    <section className="panel project-workload-panel"><div className="panel-title-row"><div><h2>成员与任务负荷</h2><p>点击成员筛选下方候选和正式任务。</p></div>{selectedOwner&&<button className="text-button" onClick={()=>setSelectedOwner("")}>清除筛选</button>}</div><div className="project-member-cards">{overview?.member_workloads.map((member)=><button key={member.user_id} className={selectedOwner===member.user_id?"active":""} onClick={()=>setSelectedOwner((value)=>value===member.user_id?"":member.user_id)}><Avatar name={member.name}/><div><strong>{member.name}</strong><small>{member.active_count} 项进行中 · {member.completed_count} 项完成</small></div><span className={member.attention_count?"attention":""}>{member.task_count}<small>总任务</small></span></button>)}</div></section>
+    <div className="project-task-overview-grid"><section className="panel project-candidate-panel"><div className="panel-title-row"><div><h2>AI 候选小任务</h2><p>逐项打开设置阶段、人员、截止时间和执行方式。</p></div><span>{projectCandidates.length} 项</span></div><div className="project-candidate-stack">{projectCandidates.map((candidate)=><button key={candidate.id} onClick={()=>openCandidate(candidate)}><span className="candidate-spark"><Sparkles size={16}/></span><div><strong>{candidate.title}</strong><small>{candidate.execution_mode} · 置信度 {candidate.confidence}%</small><p>{candidate.deliverable}</p></div><ChevronRight size={16}/></button>)}{!projectCandidates.length&&!loading&&<p className="empty-inline">暂无待审核候选；可点击“AI 拆解项目”生成。</p>}</div></section><section className="panel project-formal-task-panel"><div className="panel-title-row"><div><h2>正式任务执行情况</h2><p>确认后的任务进入现有接收、执行、提交和验收闭环。</p></div><span>{projectTasks.length} 项</span></div><div className="project-formal-task-list">{projectTasks.map((task)=><button key={task.id} onClick={()=>openTask(task)}><Avatar name={task.owner} size="sm"/><div><strong>{task.title}</strong><small>{task.owner} · {task.due}</small></div><ModePill mode={task.mode}/><StatusPill status={task.status}/><ChevronRight size={15}/></button>)}{!projectTasks.length&&!loading&&<p className="empty-inline">暂无正式任务。</p>}</div></section></div>
+    {decompositionOpen&&<ProjectDecompositionModal project={project} onClose={()=>setDecompositionOpen(false)} onCreated={(rows)=>{setCandidates((items)=>[...rows,...items.filter((item)=>!rows.some((row)=>row.id===item.id))]);void load();notify("候选已进入当前项目任务总览");}}/>}
+  </div>;
+}
+
 function ProjectSpace() {
   const { projectId = "" } = useParams();
   const { projects, setProjects, tasks, assets, teams, openTask, openAsset, openPreview, notify } = useHub();
@@ -1273,7 +1306,7 @@ function ProjectSpace() {
   const canInviteProject = project.ownerId===user.id || projectMembers.some((member)=>member.id===user.id);
   const projectTasks = tasks.filter((task) => task.projectId === project.id);
   const projectAssets = assets.filter((asset) => asset.scope.includes(project.client) || project.id === "p-quanyi");
-  const tabs = ["总览", "任务", "AI 协作", "资产", "会议"];
+  const tabs = ["总览", "任务总览", "任务看板", "AI 协作", "资产", "会议"];
   const advanceStage = async (stage: NonNullable<Project["stages"]>[number]) => {const next=stage.status==="PLANNED"?"ACTIVE":stage.status==="ACTIVE"?"WAITING_REVIEW":stage.status==="WAITING_REVIEW"?"DONE":null;if(!next)return;try{const result=await updateStage(stage.id,{status:next});setProjects((items)=>items.map((item)=>item.id===project.id?projectFromApi(result,0):item));notify("阶段状态已更新");}catch(reason){notify(reason instanceof ApiError?reason.message:"阶段更新失败");}};
   return (
     <div className={`project-space-page${tab === "AI 协作" ? " is-ai-chat" : ""}`}>
@@ -1314,7 +1347,7 @@ function ProjectSpace() {
               </div>
             </section>
             <section className="panel">
-              <div className="panel-title-row"><div><h2>可执行任务</h2><p>优先显示当前阶段真正能推进的事项。</p></div><button className="text-button" onClick={() => setTab("任务")}>查看看板 <ArrowRight size={15} /></button></div>
+              <div className="panel-title-row"><div><h2>可执行任务</h2><p>优先显示当前阶段真正能推进的事项。</p></div><button className="text-button" onClick={() => setTab("任务总览")}>查看任务总览 <ArrowRight size={15} /></button></div>
               <div className="task-list">
                 {projectTasks.filter((task) => task.status !== "external").map((task) => (
                   <button className="task-row" key={task.id} onClick={() => openTask(task)}>
@@ -1340,7 +1373,8 @@ function ProjectSpace() {
         </div>
       )}
 
-      {tab === "任务" && <ProjectBoard tasks={projectTasks} />}
+      {tab === "任务总览" && <ProjectTaskOverview project={project} canDecompose={canInviteProject} />}
+      {tab === "任务看板" && <ProjectBoard tasks={projectTasks} />}
       {tab === "AI 协作" && <ProjectChat project={project} canInvite={canInviteProject&&!!projectTeam} onInvite={()=>setInviteProjectOpen(true)} />}
       {tab === "资产" && (
         <section className="panel tab-panel">
@@ -2637,14 +2671,15 @@ function CreateTask({ onClose, defaultProjectId }: { onClose: () => void; defaul
 function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onClose: () => void }) {
   const { projects, setTasks, setCandidates, refreshProjects, notify } = useHub();
   const project = projects.find((item) => item.id === candidate.project_id);
-  const teamMembers = useProjectTeamMemberProfiles(project);
-  const [form, setForm] = useState({ title:candidate.title, ownerId:candidate.owner_id || "", reviewerId:candidate.reviewer_id || "", due:candidate.due_at ? candidate.due_at.slice(0,16) : "", deliverable:candidate.deliverable, description:candidate.description });
+  const [teamMembers,setTeamMembers] = useState<ApiProjectMember[]>([]);
+  useEffect(()=>{let active=true;fetchProjectMembers(candidate.project_id).then((rows)=>{if(active)setTeamMembers(rows);}).catch(()=>{if(active)setTeamMembers([]);});return()=>{active=false;};},[candidate.project_id]);
+  const [form, setForm] = useState({ title:candidate.title, stageId:candidate.stage_id || "", ownerId:candidate.owner_id || "", reviewerId:candidate.reviewer_id || "", mode:candidate.execution_mode, due:candidate.due_at ? candidate.due_at.slice(0,16) : "", deliverable:candidate.deliverable, description:candidate.description });
   const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!form.title.trim() || !form.deliverable.trim() || !form.ownerId || !form.reviewerId) return;
     setBusy(true);
     try {
-      const updated = await updateCandidate(candidate.id,{expected_version:candidate.version,title:form.title.trim(),deliverable:form.deliverable.trim(),description:form.description.trim(),owner_id:form.ownerId,reviewer_id:form.reviewerId,due_at:form.due?new Date(form.due).toISOString():null});
+      const updated = await updateCandidate(candidate.id,{expected_version:candidate.version,title:form.title.trim(),deliverable:form.deliverable.trim(),description:form.description.trim(),stage_id:form.stageId||null,owner_id:form.ownerId,reviewer_id:form.reviewerId,execution_mode:form.mode,due_at:form.due?new Date(form.due).toISOString():null});
       const result = await confirmCandidate(updated.id,updated.version);
       setTasks((items)=>[taskFromApi(result.task),...items.filter((item)=>item.id!==result.task.id)]);
       setCandidates((items)=>items.filter((item)=>item.id!==candidate.id));
@@ -2667,8 +2702,9 @@ function CandidateReview({ candidate, onClose }: { candidate: ApiCandidate; onCl
       <div className="form-stack">
         <label><span>任务标题</span><input value={form.title} onChange={(event)=>setForm({...form,title:event.target.value})}/></label>
         <label><span>任务说明</span><textarea value={form.description} onChange={(event)=>setForm({...form,description:event.target.value})}/></label>
-        <div className="form-grid"><label><span>所属项目</span><input value={project?.name || candidate.project_id} disabled/></label><label><span>负责人</span><select value={form.ownerId} onChange={(event)=>setForm({...form,ownerId:event.target.value})}><option value="">请选择</option>{teamMembers.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+        <div className="form-grid"><label><span>所属阶段</span><select value={form.stageId} onChange={(event)=>setForm({...form,stageId:event.target.value})}><option value="">暂不归入阶段</option>{project?.stages?.map((stage)=><option value={stage.id} key={stage.id}>{stage.name}</option>)}</select></label><label><span>负责人</span><select value={form.ownerId} onChange={(event)=>setForm({...form,ownerId:event.target.value})}><option value="">请选择</option>{teamMembers.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
         <div className="form-grid"><label><span>截止时间</span><input type="datetime-local" value={form.due} onChange={(event)=>setForm({...form,due:event.target.value})}/></label><label><span>交付给 / 验收人</span><select value={form.reviewerId} onChange={(event)=>setForm({...form,reviewerId:event.target.value})}><option value="">请选择</option>{teamMembers.map((member)=><option value={member.id} key={member.id}>{member.name}</option>)}</select></label></div>
+        <label><span>执行方式</span><select value={form.mode} onChange={(event)=>setForm({...form,mode:event.target.value as ApiCandidate["execution_mode"]})}><option value="HUMAN">人工执行</option><option value="AI">AI 执行（结果仍需人工确认）</option><option value="HYBRID">人机协同</option></select></label>
         <label><span>交付物 / 验收标准</span><input value={form.deliverable} onChange={(event)=>setForm({...form,deliverable:event.target.value})}/></label>
       </div>
       <footer className="modal-actions"><button className="text-button danger" disabled={busy} onClick={ignore}>忽略候选</button><span className="action-spacer"/><button className="button secondary" disabled={busy} onClick={onClose}>稍后处理</button><button className="button primary" disabled={busy||!form.title.trim()||!form.deliverable.trim()||!form.ownerId||!form.reviewerId} onClick={create}><Check size={16}/>{busy?"正在保存…":"确认创建"}</button></footer>

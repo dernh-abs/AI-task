@@ -7,6 +7,7 @@ const REMEMBER_KEY = "quanyi-mvp-remember";
 export type ApiUser = components["schemas"]["UserRead"];
 export type ApiProject = components["schemas"]["ProjectRead"];
 export type ApiProjectMember = components["schemas"]["ProjectMemberRead"];
+export type ApiProjectTaskOverview = components["schemas"]["ProjectTaskOverviewRead"];
 export type ApiTask = components["schemas"]["TaskRead"];
 type TokenResponse = components["schemas"]["TokenResponse"];
 export type ApiTaskActionRequest = components["schemas"]["TaskActionRequest"];
@@ -69,6 +70,8 @@ export const fetchWeComStatus=()=>request<ApiWeComStatus>("/integrations/wecom/s
 export const createWeComDocument=(payload:components["schemas"]["WeComDocumentCreateRequest"])=>request<ApiWeComDocument>("/integrations/wecom/documents",{method:"POST",body:JSON.stringify(payload)});
 export const fetchProjects=()=>request<ApiProject[]>("/projects");
 export const fetchProjectMembers=(projectId:string)=>request<ApiProjectMember[]>(`/projects/${projectId}/members`);
+export const fetchProjectTaskOverview=(projectId:string)=>request<ApiProjectTaskOverview>(`/projects/${projectId}/task-overview`);
+export const decomposeProject=(projectId:string,payload:components["schemas"]["ProjectDecompositionRequest"])=>request<ApiCandidateExtractionResponse>(`/projects/${projectId}/decompositions`,{method:"POST",body:JSON.stringify(payload)});
 export const createProject=(payload:components["schemas"]["ProjectCreateRequest"])=>request<ApiProject>("/projects",{method:"POST",body:JSON.stringify(payload)});
 export const createStage=(projectId:string,payload:components["schemas"]["StageCreateRequest"])=>request<ApiProject>(`/projects/${projectId}/stages`,{method:"POST",body:JSON.stringify(payload)});
 export const updateStage=(stageId:string,payload:components["schemas"]["StageUpdateRequest"])=>request<ApiProject>(`/stages/${stageId}`,{method:"PATCH",body:JSON.stringify(payload)});

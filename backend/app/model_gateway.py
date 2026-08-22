@@ -26,8 +26,10 @@ class ExtractedCandidate(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     description: str = ""
     deliverable: str = Field(min_length=1, max_length=300)
+    stage_id: str | None = None
     owner_id: str | None = None
     reviewer_id: str | None = None
+    execution_mode: Literal["HUMAN", "AI", "HYBRID"] = "HUMAN"
     due_at: datetime | None = None
     confidence: int = Field(ge=0, le=100)
     evidence: str = Field(min_length=1, max_length=500)
@@ -82,6 +84,18 @@ def _mock_extract(content: str) -> CandidateExtraction:
     if not lines:
         lines = [content.strip() or "补充待办事项"]
     candidates = [ExtractedCandidate(title=line[:80], deliverable=f"完成并提交：{line[:100]}", confidence=80, evidence=line[:300]) for line in lines[:5]]
+    return CandidateExtraction(candidates=candidates)
+
+
+def _mock_project_decomposition(content: str, max_candidates: int, stage_ids: list[str]) -> CandidateExtraction:
+    stage_id = stage_ids[0] if stage_ids else None
+    templates = [
+        ("澄清项目范围与验收口径", "整理项目边界、关键约束和验收标准", "提交经人工确认的项目范围与验收清单", "HUMAN"),
+        ("制定阶段执行计划", "把项目目标映射到阶段、依赖和交付节奏", "提交包含依赖、负责人建议和时间节点的执行计划", "HYBRID"),
+        ("完成核心交付工作", "按确认后的范围推进核心产出", "提交可供验收的核心交付物", "HYBRID"),
+        ("执行质量检查与项目验收", "核对交付物、风险、遗留项和验收证据", "提交质量检查记录和验收结论", "HUMAN"),
+    ]
+    candidates = [ExtractedCandidate(title=title, description=description, deliverable=deliverable, stage_id=stage_id, execution_mode=mode, confidence=65, evidence="确定性降级拆解；须由项目成员逐项复核") for title, description, deliverable, mode in templates[:max_candidates]]
     return CandidateExtraction(candidates=candidates)
 
 
@@ -196,7 +210,7 @@ def _parse_due(value) -> datetime | None:
         return None
 
 
-def _sanitize_candidates(obj: dict) -> list[ExtractedCandidate]:
+def _sanitize_candidates(obj: dict, allowed_user_ids: set[str] | None = None, allowed_stage_ids: set[str] | None = None) -> list[ExtractedCandidate]:
     """Turn a loosely-structured model response into validated candidates.
 
     Small local models often return null fields, floats for confidence, or names
@@ -222,8 +236,13 @@ def _sanitize_candidates(obj: dict) -> list[ExtractedCandidate]:
             continue
         owner_raw = item.get("owner_id")
         reviewer_raw = item.get("reviewer_id")
-        owner_id = owner_raw if isinstance(owner_raw, str) and _UUID_RE.match(owner_raw) else None
-        reviewer_id = reviewer_raw if isinstance(reviewer_raw, str) and _UUID_RE.match(reviewer_raw) else None
+        owner_id = owner_raw if isinstance(owner_raw, str) and ((allowed_user_ids is not None and owner_raw in allowed_user_ids) or (allowed_user_ids is None and _UUID_RE.match(owner_raw))) else None
+        reviewer_id = reviewer_raw if isinstance(reviewer_raw, str) and ((allowed_user_ids is not None and reviewer_raw in allowed_user_ids) or (allowed_user_ids is None and _UUID_RE.match(reviewer_raw))) else None
+        stage_raw = item.get("stage_id")
+        stage_id = stage_raw if isinstance(stage_raw, str) and allowed_stage_ids is not None and stage_raw in allowed_stage_ids else None
+        execution_mode = str(item.get("execution_mode") or "HUMAN").upper()
+        if execution_mode not in {"HUMAN", "AI", "HYBRID"}:
+            execution_mode = "HUMAN"
         try:
             conf = int(float(item["confidence"])) if item.get("confidence") is not None else 70
         except (ValueError, TypeError, KeyError):
@@ -234,8 +253,10 @@ def _sanitize_candidates(obj: dict) -> list[ExtractedCandidate]:
             title=title[:160],
             description=str(item.get("description") or "").strip()[:300],
             deliverable=deliverable[:300],
+            stage_id=stage_id,
             owner_id=owner_id,
             reviewer_id=reviewer_id,
+            execution_mode=execution_mode,
             due_at=_parse_due(item.get("due_at")),
             confidence=conf,
             evidence=evidence[:500],
@@ -250,6 +271,24 @@ def _build_extract_prompt(content: str) -> str:
         "\"deliverable\":\"提交首页改版评审稿\",\"owner_id\":\"张三\",\"reviewer_id\":null,"
         "\"due_at\":\"周五前\",\"confidence\":85,\"evidence\":\"周一启动会决定由张三负责首页改版\"}]}"
     )
+
+
+def _build_project_decomposition_prompt(content: str, member_options: list[tuple[str, str]], stage_options: list[tuple[str, str]], max_candidates: int) -> str:
+    members = "\n".join(f"- {user_id}: {name}" for user_id, name in member_options) or "- 无可分配成员"
+    stages = "\n".join(f"- {stage_id}: {name}" for stage_id, name in stage_options) or "- null: 暂未建立阶段"
+    return (
+        "你是项目任务拆解助手。请把项目目标拆成可独立分配、可验收、粒度适中的候选任务。\n"
+        "只输出一个 JSON 对象，不要解释或 markdown。结构为：\n"
+        "{\"candidates\":[{\"title\":字符串,\"description\":字符串,\"deliverable\":字符串,"
+        "\"stage_id\":阶段ID或null,\"owner_id\":成员ID或null,\"reviewer_id\":成员ID或null,"
+        "\"execution_mode\":\"HUMAN\"或\"AI\"或\"HYBRID\",\"due_at\":ISO日期或null,"
+        "\"confidence\":0到100整数,\"evidence\":字符串}]}\n"
+        f"最多生成 {max_candidates} 条。不得重复现有任务；不得编造成员、阶段、完成状态或外部事实。"
+        "AI 适合资料整理、分析和草稿；需要现实沟通、决策、授权或最终验收的任务必须包含人工。\n"
+        f"可选成员（只能使用左侧 ID）：\n{members}\n"
+        f"可选阶段（只能使用左侧 ID）：\n{stages}\n\n"
+        f"项目上下文：\n{content}"
+    )
     return (
         "你是会议纪要行动项提取助手。请从文本中提取明确的待办行动项。\n"
         "只输出一个 JSON 对象，不要任何解释或 markdown。结构为：\n"
@@ -263,12 +302,19 @@ def _build_extract_prompt(content: str) -> str:
     )
 
 
-def extract_candidates(session: Session, project_id: str, content: str) -> GatewayResult:
+def extract_candidates(session: Session, project_id: str, content: str, *, decomposition: bool = False, member_options: list[tuple[str, str]] | None = None, stage_options: list[tuple[str, str]] | None = None, max_candidates: int = 8) -> GatewayResult:
     settings = load_settings()
+    member_options = member_options or []
+    stage_options = stage_options or []
+    prompt_version = "project-decomposition-v1" if decomposition else PROMPT_VERSION
+    capability = "project_decomposition" if decomposition else "candidate_extraction"
+    allowed_user_ids = {item[0] for item in member_options} if decomposition else None
+    allowed_stage_ids = {item[0] for item in stage_options} if decomposition else None
+    ordered_stage_ids = [item[0] for item in stage_options]
     target, live_model, provider_ready = _provider_state(settings)
     input_hash = hashlib.sha256(content.encode()).hexdigest()
     cache_key = hashlib.sha256(
-        f"{project_id}:{PROMPT_VERSION}:{_cache_scope(settings, live_model)}:{input_hash}".encode()
+        f"{project_id}:{prompt_version}:{_cache_scope(settings, live_model)}:{input_hash}".encode()
     ).hexdigest()
     cached = session.get(AiResponseCache, cache_key)
     if cached:
@@ -283,17 +329,17 @@ def extract_candidates(session: Session, project_id: str, content: str) -> Gatew
     today = datetime.now(timezone.utc).date().isoformat()
     spent = sum(row.cost_usd for row in session.exec(select(AiCallLog).where(AiCallLog.project_id == project_id)).all() if row.created_at.date().isoformat() == today)
     if settings.ai_mode == "live" and not provider_ready:
-        data, mode, degraded, fallback_reason = _mock_extract(content), AiExecutionMode.FALLBACK, True, "PROVIDER_NOT_CONFIGURED"
+        data, mode, degraded, fallback_reason = (_mock_project_decomposition(content, max_candidates, ordered_stage_ids) if decomposition else _mock_extract(content)), AiExecutionMode.FALLBACK, True, "PROVIDER_NOT_CONFIGURED"
     elif live_requested and spent >= settings.ai_daily_budget_usd:
-        data, mode, degraded, fallback_reason = _mock_extract(content), AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
+        data, mode, degraded, fallback_reason = (_mock_project_decomposition(content, max_candidates, ordered_stage_ids) if decomposition else _mock_extract(content)), AiExecutionMode.FALLBACK, True, "BUDGET_EXCEEDED"
     elif live_requested:
         assert target is not None
-        prompt = _build_extract_prompt(content)
+        prompt = _build_project_decomposition_prompt(content, member_options, stage_options, max_candidates) if decomposition else _build_extract_prompt(content)
         last_error: Exception | None = None
         for _attempt in range(3):
             try:
                 raw_text, usage = _live_chat(target.url, target.auth_header, target.model, prompt, target.use_json_format)
-                candidates = _sanitize_candidates(_coerce_json_object(raw_text))
+                candidates = _sanitize_candidates(_coerce_json_object(raw_text), allowed_user_ids, allowed_stage_ids)[:max_candidates]
                 if not candidates:
                     raise ValueError("model returned no usable candidates")
                 data = CandidateExtraction(candidates=candidates)
@@ -302,16 +348,16 @@ def extract_candidates(session: Session, project_id: str, content: str) -> Gatew
             except (OSError, KeyError, ValueError, ValidationError) as exc:
                 last_error = exc
         else:
-            data, mode, degraded, fallback_reason = _mock_extract(content), AiExecutionMode.FALLBACK, True, type(last_error).__name__ if last_error else "LIVE_FAILED"
+            data, mode, degraded, fallback_reason = (_mock_project_decomposition(content, max_candidates, ordered_stage_ids) if decomposition else _mock_extract(content)), AiExecutionMode.FALLBACK, True, type(last_error).__name__ if last_error else "LIVE_FAILED"
     else:
-        data = _mock_extract(content)
+        data = _mock_project_decomposition(content, max_candidates, ordered_stage_ids) if decomposition else _mock_extract(content)
     latency_ms = round((time.perf_counter() - started) * 1000)
     input_tokens = int(usage.get("prompt_tokens", max(1, len(content) // 4)))
     output_tokens = int(usage.get("completion_tokens", max(1, len(data.model_dump_json()) // 4)))
     cost = _estimate_cost(target, input_tokens, output_tokens) if mode == AiExecutionMode.LIVE else 0
     call_id = f"call-{uuid4().hex}"
     recorded_model = live_model if mode == AiExecutionMode.LIVE else "deterministic-mock-v1"
-    session.add(AiCallLog(id=call_id, project_id=project_id, capability="candidate_extraction", prompt_version=PROMPT_VERSION, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost, success=True))
+    session.add(AiCallLog(id=call_id, project_id=project_id, capability=capability, prompt_version=prompt_version, model=recorded_model, execution_mode=mode, degraded=degraded, fallback_reason=fallback_reason, input_hash=input_hash, latency_ms=latency_ms, input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost, success=True))
     result = GatewayResult(data=data, execution_mode=mode.value, degraded=degraded, fallback_reason=fallback_reason, call_id=call_id)
     session.add(AiResponseCache(cache_key=cache_key, response_json=result.model_dump_json()))
     return result

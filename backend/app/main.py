@@ -22,9 +22,9 @@ from .dependencies import get_current_user
 from .external_reminders import reminder_level, scan_external_reminders
 from .email_delivery import send_invitation_email
 from .model_gateway import GatewayOutputError, extract_candidates, generate_project_chat_reply
-from .models import AgentRun, AgentRunStatus, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, Team, TeamMember, TeamRole, User, utc_now
+from .models import AgentRun, AgentRunStatus, AuditEvent, CandidateStatus, CandidateTask, ContributionEvent, ExternalContact, ExternalDependency, ExternalFeedbackStatus, ExternalReminderEvent, IdempotencyRecord, Project, ProjectChatMessage, ProjectConversation, ProjectMember, ProjectRole, SourceSnapshot, Stage, StageStatus, Task, TaskStatus, TaskStatusHistory, TaskSubmission, Team, TeamMember, TeamRole, User, utc_now
 from .permissions import can_contribute_project, can_manage_project, can_read_project, is_team_admin, readable_project_ids
-from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectMemberRead, ProjectRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead, WeComDocumentCreateRequest, WeComDocumentRead, WeComStatusRead
+from .schemas import AgentRunRead, AgentRunStartRequest, AgentRunStartResponse, CandidateConfirmRequest, CandidateConfirmResponse, CandidateExtractionRequest, CandidateExtractionResponse, CandidateRead, CandidateUpdateRequest, ChangePasswordRequest, ContributionRead, ExternalContactRead, ExternalDependencyRead, ExternalReminderRead, InvitationAcceptRequest, InvitationAdminRead, InvitationCreateRequest, InvitationCreatedRead, InvitationPublicRead, LoginRequest, ProjectChatMessageRead, ProjectChatSendRequest, ProjectChatSendResponse, ProjectConversationCreateRequest, ProjectConversationRead, ProjectCreateRequest, ProjectDecompositionRequest, ProjectMemberRead, ProjectMemberWorkloadRead, ProjectRead, ProjectTaskOverviewRead, ProjectUpdateRequest, StageCreateRequest, StageUpdateRequest, StatusHistoryRead, SubmissionRead, TaskAction, TaskActionRequest, TaskActionResponse, TaskCreateRequest, TaskRead, TeamRead, TokenResponse, UserRead, WeComDocumentCreateRequest, WeComDocumentRead, WeComStatusRead
 from .security import create_access_token, verify_password
 from .seed import seed_demo_data
 from .services import project_reads, task_reads
@@ -207,6 +207,83 @@ def list_project_members(project_id: str, user: User = Depends(get_current_user)
         if member and member.is_active:
             rows.append(ProjectMemberRead(id=member.id, email=member.email, name=member.name, role=ProjectRole(membership.role), is_active=member.is_active))
     return rows
+
+
+@app.post("/api/projects/{project_id}/decompositions", response_model=CandidateExtractionResponse)
+def decompose_project(project_id: str, payload: ProjectDecompositionRequest, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> CandidateExtractionResponse:
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.owner_id != user.id and not session.get(ProjectMember, (project_id, user.id)):
+        raise HTTPException(status_code=403, detail="Only project members can decompose this project")
+    memberships = session.exec(select(ProjectMember).where(ProjectMember.project_id == project_id)).all()
+    member_options = [(membership.user_id, account.name) for membership in memberships if (account := session.get(User, membership.user_id)) and account.is_active]
+    stages = session.exec(select(Stage).where(Stage.project_id == project_id).order_by(Stage.position)).all()
+    stage_options = [(stage.id, stage.name) for stage in stages]
+    existing_tasks = session.exec(select(Task).where(Task.project_id == project_id).order_by(Task.created_at)).all()
+    context_lines = [
+        f"项目：{project.name}",
+        f"目标：{project.objective or '未设置'}",
+        f"下一里程碑：{project.next_milestone or '未设置'}",
+        f"项目截止日期：{project.due_at.isoformat() if project.due_at else '未设置'}",
+        "现有阶段：" + ("；".join(f"{stage.name}({stage.status})" for stage in stages) or "未设置"),
+        "现有任务（不得重复）：" + ("；".join(f"{task.title}({task.status})" for task in existing_tasks) or "暂无"),
+    ]
+    if payload.instruction.strip():
+        context_lines.append(f"人工补充要求：{payload.instruction.strip()}")
+    content = "\n".join(context_lines)
+    try:
+        gateway = extract_candidates(session, project.id, content, decomposition=True, member_options=member_options, stage_options=stage_options, max_candidates=payload.max_candidates)
+    except GatewayOutputError as exc:
+        raise HTTPException(status_code=422, detail={"code": "AI_SCHEMA_INVALID", "message": "AI output did not match the project decomposition schema; no candidates were created"}) from exc
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
+    existing_snapshot = session.exec(select(SourceSnapshot).where(SourceSnapshot.project_id == project.id, SourceSnapshot.source_type == "PROJECT_DECOMPOSITION", SourceSnapshot.content_hash == content_hash, SourceSnapshot.created_by == user.id).order_by(SourceSnapshot.created_at.desc())).first()
+    if existing_snapshot:
+        existing_candidates = session.exec(select(CandidateTask).where(CandidateTask.source_snapshot_id == existing_snapshot.id).order_by(CandidateTask.created_at)).all()
+        return CandidateExtractionResponse(snapshot_id=existing_snapshot.id, candidates=[candidate_read(item) for item in existing_candidates], execution_mode=gateway.execution_mode, degraded=gateway.degraded, fallback_reason=gateway.fallback_reason, cached=True, call_id=gateway.call_id)
+    snapshot = SourceSnapshot(id=f"src-{uuid4().hex}", project_id=project.id, source_type="PROJECT_DECOMPOSITION", title=f"{project.name} · AI 项目拆解", content=content, content_hash=content_hash, created_by=user.id, extraction_version="project-decomposition-v1")
+    session.add(snapshot)
+    session.flush()
+    candidates: list[CandidateTask] = []
+    for extracted in gateway.data.candidates[:payload.max_candidates]:
+        candidate = CandidateTask(id=f"cand-{uuid4().hex}", source_snapshot_id=snapshot.id, project_id=project.id, stage_id=extracted.stage_id, title=extracted.title, description=extracted.description, deliverable=extracted.deliverable, owner_id=extracted.owner_id or user.id, reviewer_id=extracted.reviewer_id or project.owner_id, execution_mode=extracted.execution_mode, due_at=extracted.due_at, confidence=extracted.confidence, evidence=extracted.evidence)
+        session.add(candidate)
+        candidates.append(candidate)
+    session.add(AuditEvent(id=f"audit-{uuid4().hex}", actor_id=user.id, resource_type="project", resource_id=project.id, action="AI_DECOMPOSITION_CREATED", detail_json=f'{{"snapshot_id":"{snapshot.id}","candidate_count":{len(candidates)}}}'))
+    session.commit()
+    for candidate in candidates:
+        session.refresh(candidate)
+    return CandidateExtractionResponse(snapshot_id=snapshot.id, candidates=[candidate_read(item) for item in candidates], execution_mode=gateway.execution_mode, degraded=gateway.degraded, fallback_reason=gateway.fallback_reason, cached=gateway.cached, call_id=gateway.call_id)
+
+
+@app.get("/api/projects/{project_id}/task-overview", response_model=ProjectTaskOverviewRead)
+def project_task_overview(project_id: str, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> ProjectTaskOverviewRead:
+    project = session.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not can_read_project(session, user, project):
+        raise HTTPException(status_code=403, detail="Project access denied")
+    project_read = project_reads(session, [project_id])[0]
+    tasks = session.exec(select(Task).where(Task.project_id == project_id)).all()
+    candidates = session.exec(select(CandidateTask).where(CandidateTask.project_id == project_id, CandidateTask.status == CandidateStatus.ACTIVE)).all()
+    status_counts: dict[str, int] = {}
+    for task in tasks:
+        key = TaskStatus(task.status).value
+        status_counts[key] = status_counts.get(key, 0) + 1
+    now = datetime.now(timezone.utc)
+    member_ids = {membership.user_id for membership in session.exec(select(ProjectMember).where(ProjectMember.project_id == project_id)).all()}
+    member_ids.update(task.owner_id for task in tasks)
+    workloads: list[ProjectMemberWorkloadRead] = []
+    for member_id in sorted(member_ids):
+        account = session.get(User, member_id)
+        if not account or not account.is_active:
+            continue
+        owned = [task for task in tasks if task.owner_id == member_id]
+        active = [task for task in owned if TaskStatus(task.status) not in {TaskStatus.DONE, TaskStatus.CANCELED}]
+        attention = [task for task in active if TaskStatus(task.status) == TaskStatus.BLOCKED or (task.due_at and (task.due_at if task.due_at.tzinfo else task.due_at.replace(tzinfo=timezone.utc)) < now)]
+        workloads.append(ProjectMemberWorkloadRead(user_id=member_id, name=account.name, task_count=len(owned), active_count=len(active), attention_count=len(attention), completed_count=sum(TaskStatus(task.status) == TaskStatus.DONE for task in owned)))
+    workloads.sort(key=lambda item: (-item.active_count, item.name))
+    return ProjectTaskOverviewRead(project_id=project_id, progress=project_read.progress, health=project_read.health, task_count=len(tasks), active_candidate_count=len(candidates), status_counts=status_counts, member_workloads=workloads)
 
 
 def _conversation_for_user(conversation_id: str, user: User, session: Session, require_contributor: bool = False) -> ProjectConversation:
@@ -530,7 +607,7 @@ def create_candidate_extraction(payload: CandidateExtractionRequest, user: User 
     session.flush()
     candidates: list[CandidateTask] = []
     for extracted in gateway.data.candidates:
-        candidate = CandidateTask(id=f"cand-{uuid4().hex}", source_snapshot_id=snapshot.id, project_id=project.id, title=extracted.title, description=extracted.description, deliverable=extracted.deliverable, owner_id=extracted.owner_id or user.id, reviewer_id=extracted.reviewer_id or project.owner_id, due_at=extracted.due_at, confidence=extracted.confidence, evidence=extracted.evidence)
+        candidate = CandidateTask(id=f"cand-{uuid4().hex}", source_snapshot_id=snapshot.id, project_id=project.id, stage_id=extracted.stage_id, title=extracted.title, description=extracted.description, deliverable=extracted.deliverable, owner_id=extracted.owner_id or user.id, reviewer_id=extracted.reviewer_id or project.owner_id, execution_mode=extracted.execution_mode, due_at=extracted.due_at, confidence=extracted.confidence, evidence=extracted.evidence)
         session.add(candidate)
         candidates.append(candidate)
     session.commit()

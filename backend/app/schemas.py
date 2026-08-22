@@ -330,11 +330,13 @@ class CandidateRead(ApiModel):
     id: str
     source_snapshot_id: str
     project_id: str
+    stage_id: str | None
     title: str
     description: str
     deliverable: str
     owner_id: str | None
     reviewer_id: str | None
+    execution_mode: ExecutionMode
     due_at: datetime | None
     confidence: int
     evidence: str
@@ -358,9 +360,35 @@ class CandidateUpdateRequest(ApiModel):
     title: str | None = None
     description: str | None = None
     deliverable: str | None = None
+    stage_id: str | None = None
     owner_id: str | None = None
     reviewer_id: str | None = None
+    execution_mode: ExecutionMode | None = None
     due_at: datetime | None = None
+
+
+class ProjectDecompositionRequest(ApiModel):
+    instruction: str = Field(default="", max_length=2_000)
+    max_candidates: int = Field(default=8, ge=1, le=20)
+
+
+class ProjectMemberWorkloadRead(ApiModel):
+    user_id: str
+    name: str
+    task_count: int
+    active_count: int
+    attention_count: int
+    completed_count: int
+
+
+class ProjectTaskOverviewRead(ApiModel):
+    project_id: str
+    progress: int
+    health: Literal["正常", "有风险", "需关注"]
+    task_count: int
+    active_candidate_count: int
+    status_counts: dict[str, int]
+    member_workloads: list[ProjectMemberWorkloadRead]
 
 
 class CandidateConfirmRequest(ApiModel):

@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 test = ["httpx>=0.28,<1", "pytest>=8.4,<10"]
 
+[project.scripts]
+ai-task = "app.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

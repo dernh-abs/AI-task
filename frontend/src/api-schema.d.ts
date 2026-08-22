@@ -279,6 +279,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/decompositions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decompose Project */
+        post: operations["decompose_project_api_projects__project_id__decompositions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/task-overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Task Overview */
+        get: operations["project_task_overview_api_projects__project_id__task_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/conversations": {
         parameters: {
             query?: never;
@@ -723,6 +757,8 @@ export interface components {
             source_snapshot_id: string;
             /** Project Id */
             project_id: string;
+            /** Stage Id */
+            stage_id: string | null;
             /** Title */
             title: string;
             /** Description */
@@ -733,6 +769,7 @@ export interface components {
             owner_id: string | null;
             /** Reviewer Id */
             reviewer_id: string | null;
+            execution_mode: components["schemas"]["ExecutionMode"];
             /** Due At */
             due_at: string | null;
             /** Confidence */
@@ -756,10 +793,13 @@ export interface components {
             description?: string | null;
             /** Deliverable */
             deliverable?: string | null;
+            /** Stage Id */
+            stage_id?: string | null;
             /** Owner Id */
             owner_id?: string | null;
             /** Reviewer Id */
             reviewer_id?: string | null;
+            execution_mode?: components["schemas"]["ExecutionMode"] | null;
             /** Due At */
             due_at?: string | null;
         };
@@ -1055,6 +1095,19 @@ export interface components {
             /** Due At */
             due_at?: string | null;
         };
+        /** ProjectDecompositionRequest */
+        ProjectDecompositionRequest: {
+            /**
+             * Instruction
+             * @default
+             */
+            instruction: string;
+            /**
+             * Max Candidates
+             * @default 8
+             */
+            max_candidates: number;
+        };
         /** ProjectMemberRead */
         ProjectMemberRead: {
             /** Id */
@@ -1066,6 +1119,21 @@ export interface components {
             role: components["schemas"]["ProjectRole"];
             /** Is Active */
             is_active: boolean;
+        };
+        /** ProjectMemberWorkloadRead */
+        ProjectMemberWorkloadRead: {
+            /** User Id */
+            user_id: string;
+            /** Name */
+            name: string;
+            /** Task Count */
+            task_count: number;
+            /** Active Count */
+            active_count: number;
+            /** Attention Count */
+            attention_count: number;
+            /** Completed Count */
+            completed_count: number;
         };
         /** ProjectRead */
         ProjectRead: {
@@ -1106,6 +1174,28 @@ export interface components {
          * @enum {string}
          */
         ProjectRole: "OWNER" | "MEMBER" | "VIEWER";
+        /** ProjectTaskOverviewRead */
+        ProjectTaskOverviewRead: {
+            /** Project Id */
+            project_id: string;
+            /** Progress */
+            progress: number;
+            /**
+             * Health
+             * @enum {string}
+             */
+            health: "正常" | "有风险" | "需关注";
+            /** Task Count */
+            task_count: number;
+            /** Active Candidate Count */
+            active_candidate_count: number;
+            /** Status Counts */
+            status_counts: {
+                [key: string]: number;
+            };
+            /** Member Workloads */
+            member_workloads: components["schemas"]["ProjectMemberWorkloadRead"][];
+        };
         /** ProjectUpdateRequest */
         ProjectUpdateRequest: {
             /** Name */
@@ -1990,6 +2080,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectMemberRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decompose_project_api_projects__project_id__decompositions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectDecompositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateExtractionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_task_overview_api_projects__project_id__task_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectTaskOverviewRead"];
                 };
             };
             /** @description Validation Error */
